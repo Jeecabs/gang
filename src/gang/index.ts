@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -25,6 +26,33 @@ const execFileP = promisify(execFile);
 const GANG_DIR = dirname(fileURLToPath(import.meta.url));
 const GANG_INDEX = join(GANG_DIR, "index.ts");
 const INTERCOM_INDEX = join(GANG_DIR, "..", "intercom", "index.ts");
+
+const COMMAND_COMPLETIONS: AutocompleteItem[] = [
+  { value: "watch", label: "watch", description: "Open mission control" },
+  { value: "spawn ", label: "spawn", description: "Spawn a member: spawn <role> <task>" },
+  { value: "list", label: "list", description: "Show spawned members" },
+];
+
+const ROLE_COMPLETIONS = ["worker", "reviewer", "researcher", "tester", "planner"];
+
+export function getGangArgumentCompletions(prefix: string): AutocompleteItem[] | null {
+  const trimmedStart = prefix.trimStart();
+  if (!trimmedStart.includes(" ")) {
+    const completions = COMMAND_COMPLETIONS.filter((item) => item.label.startsWith(trimmedStart));
+    return completions.length > 0 ? completions : null;
+  }
+
+  const spawnMatch = trimmedStart.match(/^spawn\s+(\S*)$/);
+  if (!spawnMatch) return null;
+
+  const rolePrefix = spawnMatch[1] ?? "";
+  const completions = ROLE_COMPLETIONS.filter((role) => role.startsWith(rolePrefix)).map((role) => ({
+    value: `spawn ${role} `,
+    label: role,
+    description: `Spawn ${role} member`,
+  }));
+  return completions.length > 0 ? completions : null;
+}
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -167,6 +195,7 @@ spawn returns immediately. The member runs its own pi session in a tmux pane (wa
 
   pi.registerCommand("gang", {
     description: "Mission control (/gang watch), roster (/gang), or spawn (/gang spawn <role> <task>)",
+    getArgumentCompletions: getGangArgumentCompletions,
     async handler(args, ctx: ExtensionContext) {
       const say = (msg: string, level: "info" | "warning" | "error") => {
         if (ctx.hasUI) ctx.ui.notify(msg, level);
@@ -174,6 +203,10 @@ spawn returns immediately. The member runs its own pi session in a tmux pane (wa
       const trimmed = args.trim();
       if (trimmed === "watch") {
         await openMissionControl(ctx);
+        return;
+      }
+      if (trimmed === "" || trimmed === "list") {
+        say(formatRoster(), "info");
         return;
       }
       if (trimmed.startsWith("spawn")) {
@@ -193,7 +226,7 @@ spawn returns immediately. The member runs its own pi session in a tmux pane (wa
         }
         return;
       }
-      say(formatRoster(), "info");
+      say(`Unknown gang command "${trimmed}". Use /gang, /gang list, /gang watch, or /gang spawn <role> <task>.`, "warning");
     },
   });
 
