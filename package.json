@@ -1,0 +1,32 @@
+{
+  "name": "gang",
+  "version": "0.1.0",
+  "description": "Minimal, observable subagent primitive for Pi — visible tmux members, cross-agent intercom, and a mission-control GUI.",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "scripts": {
+    "test": "tsx --test \"src/**/*.test.ts\""
+  },
+  "pi": {
+    "extensions": [
+      "./src/intercom/index.ts",
+      "./src/gang/index.ts"
+    ],
+    "skills": [
+      "./src/intercom/skills"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.2"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-tui": "^0.80.2"
+  },
+  "dependencies": {
+    "tsx": "^4.22.4",
+    "typebox": "^1.1.38"
+  }
+}
