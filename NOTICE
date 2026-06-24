@@ -1,0 +1,15 @@
+gang
+Copyright (c) 2026 Lachlan Jacobs
+
+This product vendors and modifies source from pi-intercom, used under the MIT License:
+
+  pi-intercom
+  Copyright (c) 2026 Nico Bailon
+  https://github.com/nicobailon/pi-intercom
+
+The vendored source lives under src/intercom/. It has been modified: peer-dependency
+imports retargeted from @mariozechner/* to @earendil-works/*, a broker message tap and
+an embedded mission-control HTTP/SSE server added.
+
+gang targets the Pi coding agent (@earendil-works/pi-coding-agent, originally authored by
+Mario Zechner as @mariozechner/pi-coding-agent).
