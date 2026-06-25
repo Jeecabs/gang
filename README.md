@@ -63,8 +63,8 @@ In any Pi session (it auto-names itself **`boss`** when gang loads), ask for a m
 tool yourself:
 
 ```
-gang spawn worker "list the repo's largest files"
-gang spawn reviewer --thinking high "review the diff carefully"
+/gang spawn list the repo's largest files
+/gang spawn @reviewer -t high review the diff carefully
 ```
 
 `gang spawn` returns immediately and opens a tmux pane. The member does the task in its own Pi
@@ -89,18 +89,17 @@ tail -f ~/.pi/agent/intercom/intercom.jsonl
 
 | Surface | What |
 |---|---|
-| `gang` tool | `{action:"spawn", role, task, thinking?}` · `{action:"list"}` — model-callable |
+| `gang` tool | `{action:"spawn", task, role?, thinking?}` · `{action:"list"}` · `{action:"name", name}` — model-callable |
 | `/gang` | show the roster |
-| `/gang spawn [--thinking <level>] <role> <task>` | spawn a member by hand (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`) |
+| `/gang spawn [@name] [-t <level>] <task>` | spawn a member by hand; name optional (auto `m1`, `m2`, …). Levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `/gang url` | show the browser mission-control URL (`http://localhost:<GANG_GUI_PORT>`) |
 | `/gang name [name]` | show or set this agent/session's own name |
-| `/gang boss [name]` | alias for `/gang name` |
 | `/gang watch` · `alt+g` | open mission control (in-Pi overlay) |
 | `intercom` tool | message any session: `list` / `send` / `ask` / `reply` |
 
 Env knobs: `GANG_GUI_PORT` (default `7717`), `GANG_TMUX_BIN` (default Homebrew tmux).
 
-Agent naming: unnamed orchestrator sessions auto-name as `boss of <current-folder>` (e.g. `boss of private-evals`) instead of plain `boss`. Use `/gang name <name>` (or `/gang boss <name>`) before spawning to pick a custom target; spawned members get that exact supervisor name. Member task prompts also tell agents to name themselves with `gang({ action: "name", name: "<clear role/name>" })` before spinning up their own teammate.
+Agent naming: unnamed orchestrator sessions auto-name as `boss of <current-folder>` (e.g. `boss of private-evals`) instead of plain `boss`. Use `/gang name <name>` before spawning to pick a custom target; spawned members get that exact supervisor name. Member task prompts also tell agents to name themselves with `gang({ action: "name", name: "<clear role/name>" })` before spinning up their own teammate.
 
 ## How it's wired
 
@@ -112,7 +111,7 @@ Agent naming: unnamed orchestrator sessions auto-name as `boss of <current-folde
 - `src/gang/` — the `gang` tool (spawn members in tmux, list the roster), the `/gang watch`
   overlay, and boss auto-naming.
 
-`gang spawn <role> "<task>"` launches `pi --name <role> … @<taskfile>` in a tmux pane with five
+`gang spawn <task>` (optionally `@name`) launches `pi --name <name> … @<taskfile>` in a tmux pane with five
 `PI_SUBAGENT_*` env vars. Pass `--thinking <level>` to add Pi's `--thinking` flag for that member.
 The vendored intercom extension reads the env vars at child startup to register
 the member on the bus and unlock its `contact_supervisor` tool — that's the whole contract:

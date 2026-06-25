@@ -32,16 +32,14 @@ const COMMAND_COMPLETIONS: AutocompleteItem[] = [
   { value: "watch", label: "watch", description: "Open mission control" },
   { value: "url", label: "url", description: "Show browser mission-control URL" },
   { value: "name ", label: "name", description: "Show or set this session's own name" },
-  { value: "boss ", label: "boss", description: "Alias for name" },
-  { value: "spawn ", label: "spawn", description: "Spawn a member: spawn <role> <task>" },
+  { value: "spawn ", label: "spawn", description: "Spawn a member: spawn [@name] [-t <level>] <task>" },
   { value: "list", label: "list", description: "Show spawned members" },
 ];
 
-const ROLE_COMPLETIONS = ["worker", "reviewer", "researcher", "tester", "planner"];
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 
 type SpawnCommandParseResult =
-  | { ok: true; role: string; task: string; thinkingLevel?: string }
+  | { ok: true; name?: string; task: string; thinkingLevel?: string }
   | { ok: false; error: string };
 
 function isThinkingLevel(value: string): boolean {
@@ -50,11 +48,13 @@ function isThinkingLevel(value: string): boolean {
 
 export function parseSpawnCommand(rest: string): SpawnCommandParseResult {
   const tokens = rest.trim().split(/\s+/).filter(Boolean);
-  let role: string | undefined;
+  let name: string | undefined;
   let thinkingLevel: string | undefined;
   let index = 0;
 
-  const readFlag = (): boolean => {
+  // Consume leading options in any order: `-t/--thinking <level>` and a single `@name`.
+  // The first token that is neither begins the task (task is free text, so a name needs the @ sigil).
+  const readLead = (): boolean => {
     const token = tokens[index];
     if (!token) return false;
     if (token === "--thinking" || token === "-t") {
@@ -78,23 +78,29 @@ export function parseSpawnCommand(rest: string): SpawnCommandParseResult {
       index += 1;
       return true;
     }
+    if (token.startsWith("@") && name === undefined) {
+      const candidate = token.slice(1);
+      if (!isValidRole(candidate)) {
+        throw new Error(`Invalid name "${candidate}". Use letters, digits, _ or - (start with a letter, max 32 chars).`);
+      }
+      name = candidate;
+      index += 1;
+      return true;
+    }
     return false;
   };
 
   try {
-    while (readFlag()) {}
-    role = tokens[index];
-    if (role) index += 1;
-    while (readFlag()) {}
+    while (readLead()) {}
   } catch (error) {
     return { ok: false, error: getErrorMessage(error) };
   }
 
   const task = tokens.slice(index).join(" ").trim();
-  if (!role || !task) {
-    return { ok: false, error: "Usage: /gang spawn [--thinking <level>] <role> [--thinking <level>] <task>" };
+  if (!task) {
+    return { ok: false, error: "Usage: /gang spawn [@name] [-t <level>] <task>" };
   }
-  return { ok: true, role, task, thinkingLevel };
+  return { ok: true, name, task, thinkingLevel };
 }
 
 export function getGangArgumentCompletions(prefix: string): AutocompleteItem[] | null {
@@ -104,36 +110,27 @@ export function getGangArgumentCompletions(prefix: string): AutocompleteItem[] |
     return completions.length > 0 ? completions : null;
   }
 
-  const roleMatch = trimmedStart.match(/^spawn\s+(\S*)$/);
-  if (roleMatch) {
-    const rolePrefix = roleMatch[1] ?? "";
-    const completions = ROLE_COMPLETIONS.filter((role) => role.startsWith(rolePrefix)).map((role) => ({
-      value: `spawn ${role} `,
-      label: role,
-      description: `Spawn ${role} member`,
-    }));
-    return completions.length > 0 ? completions : null;
-  }
-
-  const flagMatch = trimmedStart.match(/^spawn\s+(\S+)\s+(-{1,2}\S*)$/);
-  if (flagMatch) {
-    const role = flagMatch[1];
-    const flagPrefix = flagMatch[2] ?? "";
-    if ("--thinking".startsWith(flagPrefix) || "-t".startsWith(flagPrefix)) {
-      return [{ value: `spawn ${role} --thinking `, label: "--thinking", description: "Set member thinking level" }];
-    }
-  }
-
-  const thinkingMatch = trimmedStart.match(/^spawn\s+(\S+)\s+(?:--thinking|-t)\s+(\S*)$/);
-  if (thinkingMatch) {
-    const role = thinkingMatch[1];
-    const levelPrefix = thinkingMatch[2] ?? "";
+  // spawn grammar is `[@name] [-t <level>] <task>`; task is free text, so only the leading
+  // thinking flag and its level are completable.
+  const levelMatch = trimmedStart.match(/^(spawn\s+(?:@\S+\s+)?(?:--thinking|-t)\s+)(\S*)$/);
+  if (levelMatch) {
+    const lead = levelMatch[1];
+    const levelPrefix = levelMatch[2] ?? "";
     const completions = THINKING_LEVELS.filter((level) => level.startsWith(levelPrefix)).map((level) => ({
-      value: `spawn ${role} --thinking ${level} `,
+      value: `${lead}${level} `,
       label: level,
       description: `Use ${level} thinking`,
     }));
     return completions.length > 0 ? completions : null;
+  }
+
+  const flagMatch = trimmedStart.match(/^(spawn\s+(?:@\S+\s+)?)(-{1,2}\S*)$/);
+  if (flagMatch) {
+    const lead = flagMatch[1];
+    const flagPrefix = flagMatch[2] ?? "";
+    if ("--thinking".startsWith(flagPrefix) || "-t".startsWith(flagPrefix)) {
+      return [{ value: `${lead}--thinking `, label: "--thinking", description: "Set member thinking level" }];
+    }
   }
 
   return null;
@@ -191,14 +188,16 @@ export default function gangExtension(pi: ExtensionAPI) {
     return file;
   }
 
-  async function spawnMember(role: string, task: string, cwd: string, thinkingLevel?: string): Promise<Member> {
-    if (!isValidRole(role)) {
-      throw new Error(`Invalid role "${role}". Use letters, digits, _ or - (start with a letter, max 32 chars).`);
+  async function spawnMember(task: string, cwd: string, opts: { name?: string; thinkingLevel?: string } = {}): Promise<Member> {
+    const { name, thinkingLevel } = opts;
+    if (name !== undefined && !isValidRole(name)) {
+      throw new Error(`Invalid name "${name}". Use letters, digits, _ or - (start with a letter, max 32 chars).`);
     }
     if (thinkingLevel && !isThinkingLevel(thinkingLevel)) {
       throw new Error(`Invalid thinking level "${thinkingLevel}". Use off, minimal, low, medium, high, or xhigh.`);
     }
     const index = roster.nextIndex();
+    const role = name ?? `m${index + 1}`;
     const taskFile = writeTaskFile(role, task, index);
     // Forward PATH so the pane resolves `pi` even if the tmux server started with a minimal env.
     const env = { PATH: process.env.PATH ?? "", ...buildMemberEnv({ role, runId: roster.runId, index, orchestrator: orchestratorName }) };
@@ -219,7 +218,7 @@ export default function gangExtension(pi: ExtensionAPI) {
     const members = roster.list();
     const watch = `Watch live: tmux attach -t ${GANG_SESSION}`;
     if (members.length === 0) {
-      return `No gang members spawned yet (run ${roster.runId.slice(0, 8)}). Use \`gang spawn\` to launch one.`;
+      return `No gang members spawned yet (run ${roster.runId.slice(0, 8)}). Use \`/gang spawn <task>\` to launch one.`;
     }
     const rows = members.map((m) => {
       const preview = m.task.replace(/\s+/g, " ").slice(0, 60);
@@ -244,7 +243,8 @@ export default function gangExtension(pi: ExtensionAPI) {
     const feed = new FeedClient().start();
     try {
       await ctx.ui.custom<void>((tui, theme, keybindings, done) =>
-        new MissionControlOverlay(tui, theme, keybindings, feed, done));
+        new MissionControlOverlay(tui, theme, keybindings, feed, done,
+          () => Object.fromEntries(roster.list().map((m) => [m.role, m.task]))));
     } finally {
       feed.stop();
     }
@@ -267,29 +267,31 @@ export default function gangExtension(pi: ExtensionAPI) {
     description: `Fire up and track visible subagent "members" as live tmux panes.
 
 Usage:
-  gang({ action: "spawn", role: "worker", task: "...", thinking: "high" })  → launch a member in a tmux pane
-  gang({ action: "list" })                                                       → show the members you've spawned
-  gang({ action: "name", name: "boss of private evals" })                       → name this agent/session
+  gang({ action: "spawn", task: "..." })                                       → launch a member (auto-named m1, m2, …)
+  gang({ action: "spawn", task: "...", role: "reviewer", thinking: "high" })   → launch with an explicit name
+  gang({ action: "list" })                                                     → show the members you've spawned
+  gang({ action: "name", name: "boss of private evals" })                      → name this agent/session
 
-spawn returns immediately. The member runs its own pi session in a tmux pane (watch: tmux attach -t ${GANG_SESSION}). When done it sends its result back to you ("boss") as an intercom message — it does NOT return here. Keep working; handle the result when it arrives.`,
-    promptSnippet: `Spawn visible subagent members in tmux panes (gang spawn role/task), list them (gang list), or name the current agent/session (gang name). When you spin up a teammate or need a specific identity, name yourself first with gang({ action: "name", name: "<clear role/name>" }). Spawn results return asynchronously as intercom messages, not tool results.`,
+Only "task" is required for spawn. spawn returns immediately. The member runs its own pi session in a tmux pane (watch: tmux attach -t ${GANG_SESSION}). When done it sends its result back to you ("boss") as an intercom message — it does NOT return here. Keep working; handle the result when it arrives.`,
+    promptSnippet: `Spawn visible subagent members in tmux panes (gang spawn with a task; role/name is optional and auto-assigned), list them (gang list), or name the current agent/session (gang name). When you spin up a teammate or need a specific identity, name yourself first with gang({ action: "name", name: "<clear role/name>" }). Spawn results return asynchronously as intercom messages, not tool results.`,
     parameters: Type.Object({
       action: Type.String({ description: "'spawn', 'list', or 'name'" }),
-      role: Type.Optional(Type.String({ description: "Member role/name for spawn, e.g. 'worker', 'reviewer'" })),
-      task: Type.Optional(Type.String({ description: "What the member should do (for spawn)" })),
+      role: Type.Optional(Type.String({ description: "Optional name/role for the spawned member, e.g. 'reviewer'. Auto-assigned (m1, m2, …) if omitted; the member usually renames itself." })),
+      task: Type.Optional(Type.String({ description: "What the member should do (required for spawn)" })),
       thinking: Type.Optional(Type.String({ description: "Optional Pi thinking level for spawn: off, minimal, low, medium, high, or xhigh" })),
       name: Type.Optional(Type.String({ description: "New name for this agent/session when action='name'" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const action = params.action;
       if (action === "spawn") {
-        if (typeof params.role !== "string" || typeof params.task !== "string" || !params.role || !params.task) {
-          return { content: [{ type: "text", text: "spawn requires 'role' and 'task'." }], isError: true, details: { error: true } };
+        if (typeof params.task !== "string" || !params.task) {
+          return { content: [{ type: "text", text: "spawn requires 'task'." }], isError: true, details: { error: true } };
         }
+        const name = typeof params.role === "string" && params.role.trim() ? params.role.trim() : undefined;
         const thinkingLevel = typeof params.thinking === "string" ? params.thinking : undefined;
         try {
           orchestratorName = pi.getSessionName()?.trim() || orchestratorName;
-          const member = await spawnMember(params.role, params.task, ctx.cwd ?? process.cwd(), thinkingLevel);
+          const member = await spawnMember(params.task, ctx.cwd ?? process.cwd(), { name, thinkingLevel });
           return { content: [{ type: "text", text: spawnedMessage(member) }], isError: false, details: member };
         } catch (error) {
           return { content: [{ type: "text", text: `gang spawn failed: ${getErrorMessage(error)}` }], isError: true, details: { error: true } };
@@ -313,7 +315,7 @@ spawn returns immediately. The member runs its own pi session in a tmux pane (wa
   });
 
   pi.registerCommand("gang", {
-    description: "Mission control (/gang watch), roster (/gang), or spawn (/gang spawn [--thinking <level>] <role> <task>)",
+    description: "Mission control (/gang watch), roster (/gang), or spawn (/gang spawn [@name] [-t <level>] <task>)",
     getArgumentCompletions: getGangArgumentCompletions,
     async handler(args, ctx: ExtensionContext) {
       const say = (msg: string, level: "info" | "warning" | "error") => {
@@ -324,20 +326,19 @@ spawn returns immediately. The member runs its own pi session in a tmux pane (wa
         await openMissionControl(ctx);
         return;
       }
-      if (trimmed === "url" || trimmed === "web") {
+      if (trimmed === "url") {
         say(`Mission control: ${missionControlUrl()}`, "info");
         return;
       }
-      if (trimmed === "name" || trimmed === "boss") {
+      if (trimmed === "name") {
         orchestratorName = pi.getSessionName()?.trim() || orchestratorName;
         say(`Agent name: ${orchestratorName}`, "info");
         return;
       }
-      if (trimmed.startsWith("name ") || trimmed.startsWith("boss ")) {
-        const command = trimmed.startsWith("name ") ? "name" : "boss";
-        const nextName = trimmed.slice(command.length).trim();
+      if (trimmed.startsWith("name ")) {
+        const nextName = trimmed.slice("name ".length).trim();
         if (!nextName) {
-          say(`Usage: /gang ${command} <name>`, "warning");
+          say("Usage: /gang name <name>", "warning");
           return;
         }
         orchestratorName = nextName;
@@ -357,7 +358,7 @@ spawn returns immediately. The member runs its own pi session in a tmux pane (wa
         }
         try {
           orchestratorName = pi.getSessionName()?.trim() || orchestratorName;
-          const member = await spawnMember(parsed.role, parsed.task, ctx.cwd ?? process.cwd(), parsed.thinkingLevel);
+          const member = await spawnMember(parsed.task, ctx.cwd ?? process.cwd(), { name: parsed.name, thinkingLevel: parsed.thinkingLevel });
           const thinking = member.thinkingLevel ? ` (${member.thinkingLevel} thinking)` : "";
           say(`Launched "${member.role}"${thinking} in pane ${member.paneId}. Watch: tmux attach -t ${GANG_SESSION}`, "info");
         } catch (error) {
@@ -365,7 +366,7 @@ spawn returns immediately. The member runs its own pi session in a tmux pane (wa
         }
         return;
       }
-      say(`Unknown gang command "${trimmed}". Use /gang, /gang list, /gang url, /gang name <name>, /gang watch, or /gang spawn [--thinking <level>] <role> <task>.`, "warning");
+      say(`Unknown gang command "${trimmed}". Use /gang, /gang list, /gang url, /gang name <name>, /gang watch, or /gang spawn [@name] [-t <level>] <task>.`, "warning");
     },
   });
 

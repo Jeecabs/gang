@@ -62,6 +62,34 @@ test("overlay folds SSE events into render state", () => {
   assert.ok(renders >= 5, "each event requests a render");
 });
 
+test("phase 1+2: histogram, uptime/idle, and joined task", () => {
+  const now = 1_000_000;
+  const worker = { id: "w", name: "worker", cwd: "/r", model: "gpt-5.5", status: "tool:bash", pid: 1, startedAt: now - 12 * 60_000, lastActivity: now - 3_000 };
+  const out = renderMissionControl({
+    members: [worker, member("scribe", "idle")],
+    feed: [],
+    online: true,
+    now,
+    tasks: { worker: "reconcile selection stacks" },
+  }, theme, 100).join("\n");
+
+  assert.match(out, /◆1/, "histogram counts the tool member");
+  assert.match(out, /●1/, "histogram counts the idle member");
+  assert.match(out, /12m/, "uptime rendered");
+  assert.match(out, /·3s/, "idle-for rendered");
+  assert.match(out, /reconcile selection stacks/, "joined task rendered");
+});
+
+test("overlay forwards joined tasks via getTasks supplier", () => {
+  const feed = new EventEmitter();
+  const overlay = new MissionControlOverlay(
+    { requestRender() {} } as never, theme as never, { matches: () => false } as never,
+    feed as never, () => {}, () => ({ worker: "ship it" }),
+  );
+  feed.emit("event", { type: "snapshot", sessions: [member("worker", "idle")] });
+  assert.match(overlay.render(90).join("\n"), /ship it/);
+});
+
 test("snapshot seeds members + recent feed history, newest-first", () => {
   const feed = new EventEmitter();
   const overlay = new MissionControlOverlay({ requestRender() {} } as never, theme as never, { matches: () => false } as never, feed as never, () => {});
