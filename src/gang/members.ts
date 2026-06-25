@@ -51,4 +51,15 @@ export class Roster {
   list(): Member[] {
     return [...this.members];
   }
+
+  /** Drop members whose pane is gone/dead; returns how many were removed. */
+  prune(alivePaneIds: Set<string>): number {
+    const before = this.members.length;
+    this.members = this.members.filter((m) => alivePaneIds.has(m.paneId));
+    return before - this.members.length;
+  }
+
+  clear(): void {
+    this.members = [];
+  }
 }

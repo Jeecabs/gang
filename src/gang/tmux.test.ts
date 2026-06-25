@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { envFlags, splitArgs, newSessionArgs, tiledLayoutArgs, remainOnExitArgs, memberCommand } from "./tmux.ts";
+import { envFlags, splitArgs, newSessionArgs, tiledLayoutArgs, remainOnExitArgs, memberCommand, listPanesArgs, killPaneArgs, killSessionArgs, parsePaneList } from "./tmux.ts";
 
 test("envFlags emits one -e KEY=VAL pair per var", () => {
   assert.deepEqual(envFlags({ A: "1", B: "2" }), ["-e", "A=1", "-e", "B=2"]);
@@ -30,4 +30,19 @@ test("memberCommand loads exactly intercom+gang and passes the task as a quoted 
 test("memberCommand passes an optional thinking level", () => {
   const cmd = memberCommand({ role: "worker", taskFile: "/t.md", intercomIndex: "/x/intercom/index.ts", gangIndex: "/x/gang/index.ts", thinkingLevel: "high" });
   assert.equal(cmd, "pi --name worker --thinking high --no-extensions -e '/x/intercom/index.ts' -e '/x/gang/index.ts' @'/t.md'");
+});
+
+test("cleanup builders target the gang session/pane", () => {
+  assert.deepEqual(listPanesArgs(), ["list-panes", "-t", "gang", "-F", "#{pane_id} #{pane_dead}"]);
+  assert.deepEqual(killPaneArgs("%4"), ["kill-pane", "-t", "%4"]);
+  assert.deepEqual(killSessionArgs(), ["kill-session", "-t", "gang"]);
+});
+
+test("parsePaneList reads pane id + dead flag, ignoring blank lines", () => {
+  assert.deepEqual(parsePaneList("%1 0\n%2 1\n\n  %3 0  \n"), [
+    { paneId: "%1", dead: false },
+    { paneId: "%2", dead: true },
+    { paneId: "%3", dead: false },
+  ]);
+  assert.deepEqual(parsePaneList(""), []);
 });

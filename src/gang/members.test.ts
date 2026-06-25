@@ -29,3 +29,20 @@ test("Roster hands out monotonic indexes and a stable runId", () => {
   assert.equal(r.list()[0].role, "worker");
   assert.equal(r.runId, runId, "runId is stable for the boss process");
 });
+
+test("Roster.prune keeps only members whose pane is still alive", () => {
+  const r = new Roster();
+  r.add({ role: "a", task: "t", index: 0, paneId: "%1", runId: r.runId, spawnedAt: 1 });
+  r.add({ role: "b", task: "t", index: 1, paneId: "%2", runId: r.runId, spawnedAt: 1 });
+  r.add({ role: "c", task: "t", index: 2, paneId: "%3", runId: r.runId, spawnedAt: 1 });
+  const removed = r.prune(new Set(["%2"]));   // %1 and %3 are gone/dead
+  assert.equal(removed, 2);
+  assert.deepEqual(r.list().map((m) => m.role), ["b"]);
+});
+
+test("Roster.clear empties the roster", () => {
+  const r = new Roster();
+  r.add({ role: "a", task: "t", index: 0, paneId: "%1", runId: r.runId, spawnedAt: 1 });
+  r.clear();
+  assert.equal(r.list().length, 0);
+});

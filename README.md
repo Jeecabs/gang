@@ -92,12 +92,15 @@ tail -f ~/.pi/agent/intercom/intercom.jsonl
 | `gang` tool | `{action:"spawn", task, role?, thinking?}` · `{action:"list"}` · `{action:"name", name}` — model-callable |
 | `/gang` | show the roster |
 | `/gang spawn [@name] [-t <level>] <task>` | spawn a member by hand; name optional (auto `m1`, `m2`, …). Levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
+| `/gang clean` · `/gang clean all` | `clean` reaps finished panes (`remain-on-exit` keeps them) and prunes them from the roster; `clean all` kills the whole `gang` session — stops every member |
 | `/gang url` | show the browser mission-control URL (`http://localhost:<GANG_GUI_PORT>`) |
 | `/gang name [name]` | show or set this agent/session's own name |
 | `/gang watch` · `alt+g` | open mission control (in-Pi overlay) |
 | `intercom` tool | message any session: `list` / `send` / `ask` / `reply` |
 
-Env knobs: `GANG_GUI_PORT` (default `7717`), `GANG_TMUX_BIN` (default Homebrew tmux).
+Env knobs: `GANG_GUI_PORT` (default `7717`), `GANG_TMUX_BIN` (default Homebrew tmux), `GANG_FEED_HOURS` (mission-control feed recency window, default `6`).
+
+Finished members linger on purpose — their panes stay (`remain-on-exit on`) so you can read the final state. Reap them when you're done with `/gang clean` (or `gang({ action: "clean" })`); `/gang clean all` tears the whole session down.
 
 Agent naming: unnamed orchestrator sessions auto-name as `boss of <current-folder>` (e.g. `boss of private-evals`) instead of plain `boss`. Use `/gang name <name>` before spawning to pick a custom target; spawned members get that exact supervisor name. Member task prompts also tell agents to name themselves with `gang({ action: "name", name: "<clear role/name>" })` before spinning up their own teammate.
 
