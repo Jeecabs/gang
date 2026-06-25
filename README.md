@@ -78,6 +78,7 @@ Watch the gang three ways:
 /gang watch            # or press  alt+g
 
 # 2. in the browser — the same feed, richer
+/gang url              # prints computed localhost URL from GANG_GUI_PORT
 open http://localhost:7717
 
 # 3. durable, greppable log of every cross-agent message
@@ -91,10 +92,14 @@ tail -f ~/.pi/agent/intercom/intercom.jsonl
 | `gang` tool | `{action:"spawn", role, task, thinking?}` · `{action:"list"}` — model-callable |
 | `/gang` | show the roster |
 | `/gang spawn [--thinking <level>] <role> <task>` | spawn a member by hand (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`) |
+| `/gang url` | show the browser mission-control URL (`http://localhost:<GANG_GUI_PORT>`) |
+| `/gang boss [name]` | show or set this session's supervisor name for future members |
 | `/gang watch` · `alt+g` | open mission control (in-Pi overlay) |
 | `intercom` tool | message any session: `list` / `send` / `ask` / `reply` |
 
 Env knobs: `GANG_GUI_PORT` (default `7717`), `GANG_TMUX_BIN` (default Homebrew tmux).
+
+Boss naming: unnamed orchestrator sessions auto-name as `boss of <current-folder>` (e.g. `boss of private-evals`) instead of plain `boss`. Use `/gang boss <name>` before spawning to pick a custom target; spawned members get that exact supervisor name.
 
 ## How it's wired
 
