@@ -4,7 +4,7 @@ import { Type } from "typebox";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { mkdirSync, writeFileSync } from "fs";
-import { join, dirname } from "path";
+import { basename, join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
 import { ORCHESTRATOR, Roster, buildMemberEnv, isValidRole, type Member } from "./members.ts";
@@ -19,6 +19,7 @@ import {
   memberCommand,
 } from "./tmux.ts";
 import { FeedClient } from "./feed-client.ts";
+import { GUI_PORT } from "../intercom/gui/server.js";
 import { MissionControlOverlay } from "./ui/mission-control.ts";
 
 const execFileP = promisify(execFile);
@@ -29,6 +30,8 @@ const INTERCOM_INDEX = join(GANG_DIR, "..", "intercom", "index.ts");
 
 const COMMAND_COMPLETIONS: AutocompleteItem[] = [
   { value: "watch", label: "watch", description: "Open mission control" },
+  { value: "url", label: "url", description: "Show browser mission-control URL" },
+  { value: "boss ", label: "boss", description: "Show or set this session's supervisor name" },
   { value: "spawn ", label: "spawn", description: "Spawn a member: spawn <role> <task>" },
   { value: "list", label: "list", description: "Show spawned members" },
 ];
@@ -139,20 +142,30 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function taskFileContent(role: string, task: string): string {
+function taskFileContent(role: string, task: string, orchestrator: string): string {
   return [
     `Task: ${task}`,
     "",
-    `You are "${role}", a member of a gang supervised by "${ORCHESTRATOR}". Work autonomously.`,
+    `You are "${role}", a member of a gang supervised by "${orchestrator}". Work autonomously.`,
     "When you are finished, send your result to your supervisor with the intercom tool:",
-    `  intercom({ action: "send", to: "${ORCHESTRATOR}", message: "<your result>" })`,
+    `  intercom({ action: "send", to: "${orchestrator}", message: "<your result>" })`,
     "If you get blocked and need a decision, use the contact_supervisor tool instead.",
     "",
   ].join("\n");
 }
 
+export function missionControlUrl(port = GUI_PORT): string {
+  return `http://localhost:${port}`;
+}
+
+function defaultBossName(cwd = process.cwd()): string {
+  const project = basename(cwd).trim();
+  return project ? `boss of ${project}` : ORCHESTRATOR;
+}
+
 export default function gangExtension(pi: ExtensionAPI) {
   const roster = new Roster();
+  let orchestratorName = ORCHESTRATOR;
 
   async function runTmux(args: string[]): Promise<string> {
     const { stdout } = await execFileP(TMUX_BIN, args);
@@ -171,7 +184,7 @@ export default function gangExtension(pi: ExtensionAPI) {
     const dir = join(homedir(), ".pi/agent/gang", roster.runId);
     mkdirSync(dir, { recursive: true });
     const file = join(dir, `${index}-${role}.md`);
-    writeFileSync(file, taskFileContent(role, task));
+    writeFileSync(file, taskFileContent(role, task, orchestratorName));
     return file;
   }
 
@@ -185,7 +198,7 @@ export default function gangExtension(pi: ExtensionAPI) {
     const index = roster.nextIndex();
     const taskFile = writeTaskFile(role, task, index);
     // Forward PATH so the pane resolves `pi` even if the tmux server started with a minimal env.
-    const env = { PATH: process.env.PATH ?? "", ...buildMemberEnv({ role, runId: roster.runId, index }) };
+    const env = { PATH: process.env.PATH ?? "", ...buildMemberEnv({ role, runId: roster.runId, index, orchestrator: orchestratorName }) };
     const command = memberCommand({ role, taskFile, intercomIndex: INTERCOM_INDEX, gangIndex: GANG_INDEX, thinkingLevel });
 
     await ensureGangSession();
@@ -234,12 +247,14 @@ export default function gangExtension(pi: ExtensionAPI) {
     }
   }
 
-  // The orchestrator names itself "boss" so members' contact_supervisor / "to: boss" resolves.
+  // Name the orchestrator so members' contact_supervisor target resolves.
   // Skip child sessions (they carry PI_SUBAGENT_RUN_ID and already have a --name role).
-  pi.on("session_start", () => {
+  pi.on("session_start", (_event, ctx: ExtensionContext) => {
     const isChild = Boolean(process.env.PI_SUBAGENT_RUN_ID);
-    if (!isChild && !pi.getSessionName()) {
-      pi.setSessionName(ORCHESTRATOR);
+    const existingName = pi.getSessionName()?.trim();
+    orchestratorName = existingName || defaultBossName(ctx.cwd ?? process.cwd());
+    if (!isChild && !existingName) {
+      pi.setSessionName(orchestratorName);
     }
   });
 
@@ -268,6 +283,7 @@ spawn returns immediately. The member runs its own pi session in a tmux pane (wa
         }
         const thinkingLevel = typeof params.thinking === "string" ? params.thinking : undefined;
         try {
+          orchestratorName = pi.getSessionName()?.trim() || orchestratorName;
           const member = await spawnMember(params.role, params.task, ctx.cwd ?? process.cwd(), thinkingLevel);
           return { content: [{ type: "text", text: spawnedMessage(member) }], isError: false, details: member };
         } catch (error) {
@@ -293,6 +309,26 @@ spawn returns immediately. The member runs its own pi session in a tmux pane (wa
         await openMissionControl(ctx);
         return;
       }
+      if (trimmed === "url" || trimmed === "web") {
+        say(`Mission control: ${missionControlUrl()}`, "info");
+        return;
+      }
+      if (trimmed === "boss") {
+        orchestratorName = pi.getSessionName()?.trim() || orchestratorName;
+        say(`Supervisor name: ${orchestratorName}`, "info");
+        return;
+      }
+      if (trimmed.startsWith("boss ")) {
+        const nextName = trimmed.slice("boss".length).trim();
+        if (!nextName) {
+          say("Usage: /gang boss <name>", "warning");
+          return;
+        }
+        orchestratorName = nextName;
+        pi.setSessionName(nextName);
+        say(`Supervisor name set: ${nextName}`, "info");
+        return;
+      }
       if (trimmed === "" || trimmed === "list") {
         say(formatRoster(), "info");
         return;
@@ -304,6 +340,7 @@ spawn returns immediately. The member runs its own pi session in a tmux pane (wa
           return;
         }
         try {
+          orchestratorName = pi.getSessionName()?.trim() || orchestratorName;
           const member = await spawnMember(parsed.role, parsed.task, ctx.cwd ?? process.cwd(), parsed.thinkingLevel);
           const thinking = member.thinkingLevel ? ` (${member.thinkingLevel} thinking)` : "";
           say(`Launched "${member.role}"${thinking} in pane ${member.paneId}. Watch: tmux attach -t ${GANG_SESSION}`, "info");
@@ -312,7 +349,7 @@ spawn returns immediately. The member runs its own pi session in a tmux pane (wa
         }
         return;
       }
-      say(`Unknown gang command "${trimmed}". Use /gang, /gang list, /gang watch, or /gang spawn [--thinking <level>] <role> <task>.`, "warning");
+      say(`Unknown gang command "${trimmed}". Use /gang, /gang list, /gang url, /gang boss <name>, /gang watch, or /gang spawn [--thinking <level>] <role> <task>.`, "warning");
     },
   });
 
