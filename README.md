@@ -93,13 +93,14 @@ tail -f ~/.pi/agent/intercom/intercom.jsonl
 | `/gang` | show the roster |
 | `/gang spawn [--thinking <level>] <role> <task>` | spawn a member by hand (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`) |
 | `/gang url` | show the browser mission-control URL (`http://localhost:<GANG_GUI_PORT>`) |
-| `/gang boss [name]` | show or set this session's supervisor name for future members |
+| `/gang name [name]` | show or set this agent/session's own name |
+| `/gang boss [name]` | alias for `/gang name` |
 | `/gang watch` · `alt+g` | open mission control (in-Pi overlay) |
 | `intercom` tool | message any session: `list` / `send` / `ask` / `reply` |
 
 Env knobs: `GANG_GUI_PORT` (default `7717`), `GANG_TMUX_BIN` (default Homebrew tmux).
 
-Boss naming: unnamed orchestrator sessions auto-name as `boss of <current-folder>` (e.g. `boss of private-evals`) instead of plain `boss`. Use `/gang boss <name>` before spawning to pick a custom target; spawned members get that exact supervisor name.
+Agent naming: unnamed orchestrator sessions auto-name as `boss of <current-folder>` (e.g. `boss of private-evals`) instead of plain `boss`. Use `/gang name <name>` (or `/gang boss <name>`) before spawning to pick a custom target; spawned members get that exact supervisor name. Member task prompts also tell agents to name themselves with `gang({ action: "name", name: "<clear role/name>" })` before spinning up their own teammate.
 
 ## How it's wired
 
