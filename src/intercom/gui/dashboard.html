@@ -70,6 +70,7 @@
   }
   .sec-head h2 { margin:0; font-family:var(--display); font-size:18px; letter-spacing:1.5px; text-transform:uppercase; color:var(--bone); }
   .sec-head .n { margin-left:auto; font-family:var(--display); font-size:18px; color:var(--red); font-variant-numeric:tabular-nums; }
+  .sec-head .hist { margin-left:auto; display:inline-flex; gap:9px; align-self:center; font:600 12px/1 var(--mono); font-variant-numeric:tabular-nums; }
 
   /* ── roster ──────────────────────────────────────────────────── */
   aside { background:var(--ink-2); border-right:1px solid var(--line); display:flex; flex-direction:column; overflow:hidden; }
@@ -136,7 +137,7 @@
 
   <div class="main">
     <aside>
-      <div class="sec-head"><h2>The Squad</h2><span class="n" id="mn">0</span></div>
+      <div class="sec-head"><h2>The Squad</h2><span class="hist" id="hist"></span><span class="n" id="mn">0</span></div>
       <div id="members"></div>
       <div class="rail-foot"><span class="lbl">:7717 · intercom bus</span></div>
     </aside>
@@ -173,9 +174,31 @@ function statusLabel(st){
   if (st.startsWith("idle")) return "idle";
   return st;
 }
+function fmtDur(ms){
+  const s = Math.floor(ms/1000); if (s < 60) return s+"s";
+  const m = Math.floor(s/60);    if (m < 60) return m+"m";
+  const h = Math.floor(m/60);    if (h < 24) return h+"h";
+  return Math.floor(h/24)+"d";
+}
+function renderHist(){
+  let tool=0, think=0, idle=0, other=0;
+  for (const s of members.values()){
+    const st = s.status || "";
+    if (st.startsWith("tool:")) tool++;
+    else if (st.startsWith("thinking")) think++;
+    else if (st.startsWith("idle")) idle++;
+    else other++;
+  }
+  const chip = (n,sym,col) => n ? `<span style="color:${col}">${sym}${n}</span>` : "";
+  document.getElementById("hist").innerHTML =
+    chip(tool,"◆","var(--red)") + chip(think,"◐","var(--bone)") +
+    chip(idle,"●","var(--muted-2)") + chip(other,"·","var(--muted)");
+}
 function renderMembers(){
   setCount("mcount", members.size); setCount("mn", members.size);
+  renderHist();
   if (members.size === 0){ membersEl.innerHTML = EMPTY_MEMBERS; return; }
+  const now = Date.now();
   membersEl.innerHTML = "";
   for (const s of members.values()){
     const el = document.createElement("div");
@@ -186,7 +209,10 @@ function renderMembers(){
       `<div class="name"></div><div class="meta"></div>`;
     el.querySelector(".name").textContent = s.name || short(s.id);
     const cwd = (s.cwd || "").replace(/^.*\//, "…/");   // tail only — full path on hover
-    el.querySelector(".meta").textContent = [s.model, cwd].filter(Boolean).join(" · ");
+    const up = s.startedAt ? fmtDur(now - s.startedAt) : "";
+    const idle = s.lastActivity ? "·"+fmtDur(now - s.lastActivity) : "";   // time since last transition
+    const dur = [up, idle].filter(Boolean).join(" ");
+    el.querySelector(".meta").textContent = [s.model, cwd, dur].filter(Boolean).join(" · ");
     if (s.cwd) el.querySelector(".meta").title = s.cwd;
     membersEl.appendChild(el);
   }
@@ -227,6 +253,7 @@ es.onmessage = (e) => {
 };
 
 renderMembers(); resetFeed();        // paint empty states before first event
+setInterval(renderMembers, 1000);    // keep uptime/idle durations ticking between SSE events
 </script>
 </body>
 </html>

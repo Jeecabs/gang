@@ -16,6 +16,10 @@ export interface MissionState {
   members: SessionInfo[];
   feed: FeedItem[];
   online: boolean;
+  /** Current time for uptime/idle math; defaults to Date.now() when omitted (keeps tests deterministic). */
+  now?: number;
+  /** role → task, joined from the boss's Roster so each member shows what it's doing. */
+  tasks?: Record<string, string>;
 }
 
 /** Minimal theme surface so render() is unit-testable with a plain stub. */
@@ -48,6 +52,36 @@ function hhmm(ts: number): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+/** Compact duration: 3s / 12m / 2h / 1d. */
+function fmtDur(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
+
+/** Count members by status category for the header histogram. */
+function statusHistogram(members: SessionInfo[], theme: RenderTheme): string {
+  let tool = 0, thinking = 0, idle = 0, other = 0;
+  for (const m of members) {
+    const s = m.status || "";
+    if (s.startsWith("tool:")) tool++;
+    else if (s.startsWith("thinking")) thinking++;
+    else if (s.startsWith("idle")) idle++;
+    else other++;
+  }
+  const chip = (n: number, glyph: string, color: string) => (n ? theme.fg(color, `${glyph}${n}`) : "");
+  return [
+    chip(tool, "◆", "accent"),
+    chip(thinking, "◐", "warning"),
+    chip(idle, "●", "success"),
+    chip(other, "·", "muted"),
+  ].filter(Boolean).join(" ");
+}
+
 /** Pure renderer: state + theme + width → terminal lines. No I/O, fully testable. */
 export function renderMissionControl(state: MissionState, theme: RenderTheme, width: number): string[] {
   const inner = Math.max(44, Math.min(width - 2, 104));
@@ -68,18 +102,30 @@ export function renderMissionControl(state: MissionState, theme: RenderTheme, wi
   lines.push(row(`${title}${" ".repeat(titleGap)}${live}`));
   lines.push(border(`├${"─".repeat(inner - 2)}┤`));
 
-  // Members.
-  lines.push(row(theme.fg("muted", `MEMBERS · ${state.members.length}`)));
+  // Members. Header carries a status histogram (◆tool ◐think ●idle) right-aligned.
+  const now = state.now ?? Date.now();
+  const tasks = state.tasks ?? {};
+  const head = theme.fg("muted", `MEMBERS · ${state.members.length}`);
+  const hist = statusHistogram(state.members, theme);
+  const headGap = Math.max(2, content - visibleWidth(head) - visibleWidth(hist));
+  lines.push(row(hist ? `${head}${" ".repeat(headGap)}${hist}` : head));
   if (state.members.length === 0) {
     lines.push(row(theme.fg("dim", "  no members yet — gang spawn <role> <task>")));
   } else {
     const nameWidth = Math.min(18, Math.max(6, ...state.members.map((m) => visibleWidth(m.name || m.id.slice(0, 8)))));
+    const statusWidth = Math.min(16, Math.max(4, ...state.members.map((m) => visibleWidth(m.status || "—"))));
     for (const m of state.members) {
       const status = m.status || "—";
       const name = m.name || m.id.slice(0, 8);
-      const glyph = theme.fg(statusColor(status), statusGlyph(status));
-      const label = theme.fg(statusColor(status), status);
-      lines.push(row(`${glyph} ${theme.bold(pad(name, nameWidth))}  ${label}`));
+      const color = statusColor(status);
+      const glyph = theme.fg(color, statusGlyph(status));
+      const shown = status.length > statusWidth ? status.slice(0, statusWidth - 1) + "…" : status;
+      const label = theme.fg(color, pad(shown, statusWidth));
+      const up = m.startedAt > 0 ? fmtDur(now - m.startedAt) : "";
+      const idle = m.lastActivity > 0 ? `·${fmtDur(now - m.lastActivity)}` : "";
+      const metrics = theme.fg("dim", pad(`${up} ${idle}`.trim(), 9));
+      const taskText = tasks[name] ? theme.fg("dim", tasks[name].replace(/\s+/g, " ")) : "";
+      lines.push(row(`${glyph} ${theme.bold(pad(name, nameWidth))}  ${label}  ${metrics}  ${taskText}`));
     }
   }
   lines.push(row());
@@ -120,6 +166,7 @@ export class MissionControlOverlay implements Component {
     private readonly keybindings: KeybindingsManager,
     feed: FeedClient,
     private readonly done: () => void,
+    private readonly getTasks: () => Record<string, string> = () => ({}),
   ) {
     feed.on("status", (s: string) => {
       this.online = s === "up";
@@ -179,7 +226,7 @@ export class MissionControlOverlay implements Component {
 
   render(width: number): string[] {
     return renderMissionControl(
-      { members: [...this.members.values()], feed: this.feed, online: this.online },
+      { members: [...this.members.values()], feed: this.feed, online: this.online, now: Date.now(), tasks: this.getTasks() },
       this.theme,
       width,
     );
