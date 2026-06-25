@@ -907,6 +907,14 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       acknowledge: true,
     });
   });
+  // The gang extension names an orchestrator session lazily (on its first spawn) instead of at
+  // startup, to keep `pi -r` clean. Push the new presence name to the broker the moment it does, so
+  // a just-spawned member can address the boss by name without waiting for the next turn boundary.
+  pi.events.on("gang:boss-named", () => {
+    if (currentSessionId) {
+      syncPresenceIdentity(currentSessionId);
+    }
+  });
   pi.on("session_start", (_event, ctx) => {
     if (!config.enabled) {
       return;
