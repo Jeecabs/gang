@@ -26,3 +26,8 @@ test("memberCommand loads exactly intercom+gang and passes the task as a quoted 
   // task path with a space must stay a single shell token
   assert.ok(cmd.includes("@'/a b/t.md'"));
 });
+
+test("memberCommand passes an optional thinking level", () => {
+  const cmd = memberCommand({ role: "worker", taskFile: "/t.md", intercomIndex: "/x/intercom/index.ts", gangIndex: "/x/gang/index.ts", thinkingLevel: "high" });
+  assert.equal(cmd, "pi --name worker --thinking high --no-extensions -e '/x/intercom/index.ts' -e '/x/gang/index.ts' @'/t.md'");
+});

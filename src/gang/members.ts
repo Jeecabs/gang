@@ -11,6 +11,7 @@ export interface Member {
   paneId: string;
   runId: string;
   spawnedAt: number;
+  thinkingLevel?: string;
 }
 
 /**
