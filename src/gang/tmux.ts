@@ -60,11 +60,12 @@ function shellQuote(value: string): string {
  * The shell-command tmux runs in the member's pane. Task is passed via @file (no shell quoting of
  * task text). --no-extensions + explicit -e load exactly intercom+gang, regardless of install state.
  */
-export function memberCommand(opts: { role: string; taskFile: string; intercomIndex: string; gangIndex: string }): string {
+export function memberCommand(opts: { role: string; taskFile: string; intercomIndex: string; gangIndex: string; thinkingLevel?: string }): string {
   return [
     "pi",
     "--name",
     opts.role,
+    ...(opts.thinkingLevel ? ["--thinking", opts.thinkingLevel] : []),
     "--no-extensions",
     "-e",
     shellQuote(opts.intercomIndex),

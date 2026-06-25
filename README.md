@@ -64,6 +64,7 @@ tool yourself:
 
 ```
 gang spawn worker "list the repo's largest files"
+gang spawn reviewer --thinking high "review the diff carefully"
 ```
 
 `gang spawn` returns immediately and opens a tmux pane. The member does the task in its own Pi
@@ -87,9 +88,9 @@ tail -f ~/.pi/agent/intercom/intercom.jsonl
 
 | Surface | What |
 |---|---|
-| `gang` tool | `{action:"spawn", role, task}` · `{action:"list"}` — model-callable |
+| `gang` tool | `{action:"spawn", role, task, thinking?}` · `{action:"list"}` — model-callable |
 | `/gang` | show the roster |
-| `/gang spawn <role> <task>` | spawn a member by hand |
+| `/gang spawn [--thinking <level>] <role> <task>` | spawn a member by hand (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`) |
 | `/gang watch` · `alt+g` | open mission control (in-Pi overlay) |
 | `intercom` tool | message any session: `list` / `send` / `ask` / `reply` |
 
@@ -106,7 +107,8 @@ Env knobs: `GANG_GUI_PORT` (default `7717`), `GANG_TMUX_BIN` (default Homebrew t
   overlay, and boss auto-naming.
 
 `gang spawn <role> "<task>"` launches `pi --name <role> … @<taskfile>` in a tmux pane with five
-`PI_SUBAGENT_*` env vars. The vendored intercom extension reads them at child startup to register
+`PI_SUBAGENT_*` env vars. Pass `--thinking <level>` to add Pi's `--thinking` flag for that member.
+The vendored intercom extension reads the env vars at child startup to register
 the member on the bus and unlock its `contact_supervisor` tool — that's the whole contract:
 
 | Env var | Set to | Effect |
