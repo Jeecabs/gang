@@ -44,6 +44,12 @@ const COMMAND_COMPLETIONS: AutocompleteItem[] = [
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 
+// Emitted when the boss claims its session name on first spawn. The intercom extension listens and
+// re-registers the new presence name on the bus immediately (no turn boundary to wait for), so a
+// freshly-spawned member can address the boss by name right away. Keep this string in sync with the
+// listener in src/intercom/index.ts.
+const BOSS_NAMED_EVENT = "gang:boss-named";
+
 type SpawnCommandParseResult =
   | { ok: true; name?: string; task: string; thinkingLevel?: string }
   | { ok: false; error: string };
@@ -206,6 +212,12 @@ export default function gangExtension(pi: ExtensionAPI) {
     if (thinkingLevel && !isThinkingLevel(thinkingLevel)) {
       throw new Error(`Invalid thinking level "${thinkingLevel}". Use off, minimal, low, medium, high, or xhigh.`);
     }
+    // Claim the boss identity lazily — first spawn is when we actually need to be addressable. Push
+    // it onto the bus now so this member can reach us by name without waiting for our next turn.
+    if (!pi.getSessionName()?.trim()) {
+      pi.setSessionName(orchestratorName);
+      pi.events.emit(BOSS_NAMED_EVENT);
+    }
     const index = roster.nextIndex();
     const role = name ?? `m${index + 1}`;
     const taskFile = writeTaskFile(role, task, index);
@@ -294,15 +306,13 @@ export default function gangExtension(pi: ExtensionAPI) {
     }
   }
 
-  // Name the orchestrator so members' contact_supervisor target resolves.
-  // Skip child sessions (they carry PI_SUBAGENT_RUN_ID and already have a --name role).
+  // Compute the orchestrator identity but DON'T persist it yet. Naming every session at startup
+  // floods `pi -r` with identical "boss of <folder>" entries; we claim the name lazily on the first
+  // spawn (see spawnMember), so sessions that never use gang keep their natural resume title.
+  // A child already has its --name role as its session name, so existingName keeps that.
   pi.on("session_start", (_event, ctx: ExtensionContext) => {
-    const isChild = Boolean(process.env.PI_SUBAGENT_RUN_ID);
     const existingName = pi.getSessionName()?.trim();
     orchestratorName = existingName || defaultBossName(ctx.cwd ?? process.cwd());
-    if (!isChild && !existingName) {
-      pi.setSessionName(orchestratorName);
-    }
   });
 
   pi.registerTool({

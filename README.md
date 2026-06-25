@@ -59,8 +59,9 @@ Unsure about Pi extensions in general? Pi documents itself — just ask it:
 
 ## Use
 
-In any Pi session (it auto-names itself **`boss`** when gang loads), ask for a member — or call the
-tool yourself:
+In any Pi session, ask for a member — or call the tool yourself. The session adopts the **`boss`**
+identity the first time you spawn (not before), so sessions where you never use gang keep their
+natural title in `pi -r`:
 
 ```
 /gang spawn list the repo's largest files
@@ -102,7 +103,7 @@ Env knobs: `GANG_GUI_PORT` (default `7717`), `GANG_TMUX_BIN` (default Homebrew t
 
 Finished members linger on purpose — their panes stay (`remain-on-exit on`) so you can read the final state. Reap them when you're done with `/gang clean` (or `gang({ action: "clean" })`); `/gang clean all` tears the whole session down.
 
-Agent naming: unnamed orchestrator sessions auto-name as `boss of <current-folder>` (e.g. `boss of private-evals`) instead of plain `boss`. Use `/gang name <name>` before spawning to pick a custom target; spawned members get that exact supervisor name. Member task prompts also tell agents to name themselves with `gang({ action: "name", name: "<clear role/name>" })` before spinning up their own teammate.
+Agent naming: an unnamed orchestrator session claims `boss of <current-folder>` (e.g. `boss of private-evals`) **on its first spawn**, not at startup — so plain Pi sessions stay unnamed in the `pi -r` resume list. Use `/gang name <name>` before spawning to pick a custom target; spawned members get that exact supervisor name. Member task prompts also tell agents to name themselves with `gang({ action: "name", name: "<clear role/name>" })` before spinning up their own teammate.
 
 ## How it's wired
 
