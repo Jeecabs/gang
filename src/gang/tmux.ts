@@ -52,6 +52,38 @@ export function selectPaneArgs(paneId: string): string[] {
   return ["select-pane", "-t", paneId];
 }
 
+/** List every pane in the session with its dead flag: lines of `#{pane_id} #{pane_dead}`. */
+export function listPanesArgs(session = GANG_SESSION): string[] {
+  return ["list-panes", "-t", session, "-F", "#{pane_id} #{pane_dead}"];
+}
+
+/** Reap one finished pane (a member whose pi process exited but remain-on-exit kept it). */
+export function killPaneArgs(paneId: string): string[] {
+  return ["kill-pane", "-t", paneId];
+}
+
+/** Nuke the whole gang session — stops every member, running or not. */
+export function killSessionArgs(session = GANG_SESSION): string[] {
+  return ["kill-session", "-t", session];
+}
+
+export interface PaneState {
+  paneId: string;
+  dead: boolean;
+}
+
+/** Parse `list-panes -F '#{pane_id} #{pane_dead}'` output. `pane_dead` is 1 for a finished pane. */
+export function parsePaneList(stdout: string): PaneState[] {
+  return stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [paneId, dead] = line.split(/\s+/);
+      return { paneId, dead: dead === "1" };
+    });
+}
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }

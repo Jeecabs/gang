@@ -6,7 +6,7 @@ import { randomUUID } from "crypto";
 import { writeMessage, createMessageReader } from "./framing.js";
 import { getBrokerSocketPath } from "./paths.js";
 import { appendIntercomLog } from "./tap.js";
-import { startGuiServer, type GuiServer } from "../gui/server.js";
+import { startGuiServer, recentFeed, type GuiServer } from "../gui/server.js";
 import type { SessionInfo, Message, Attachment, BrokerMessage } from "../types.js";
 
 const INTERCOM_DIR = join(homedir(), ".pi/agent/intercom");
@@ -118,7 +118,7 @@ class IntercomBroker {
     this.gui = startGuiServer({
       getSnapshot: () => ({
         sessions: Array.from(this.sessions.values()).map((s) => s.info),
-        feed: this.recentFeed,
+        feed: recentFeed(this.recentFeed, Date.now()),
       }),
     });
   }

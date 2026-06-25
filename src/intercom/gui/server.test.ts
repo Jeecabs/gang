@@ -3,7 +3,19 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
-import { startGuiServer } from "./server.ts";
+import { startGuiServer, recentFeed } from "./server.ts";
+
+test("recentFeed drops entries older than the recency window", () => {
+  const now = 1_000_000_000_000;
+  const hour = 3_600_000;
+  const feed = [
+    { ts: now - 7 * hour, text: "old" },
+    { ts: now - 2 * hour, text: "recent" },
+    { ts: now, text: "now" },
+    { text: "no-ts" },
+  ];
+  assert.deepEqual(recentFeed(feed, now, 6 * hour).map((e) => e.text), ["recent", "now"]);
+});
 
 test("GUI emits a routed message over SSE to a connected client", async () => {
   const gui = startGuiServer({ port: 0, getSnapshot: () => ({ sessions: [], feed: [] }) });

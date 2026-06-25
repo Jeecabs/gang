@@ -7,6 +7,15 @@ import type { SessionInfo } from "../types.js";
 const DASHBOARD = join(dirname(fileURLToPath(import.meta.url)), "dashboard.html");
 export const GUI_PORT = Number(process.env.GANG_GUI_PORT ?? 7717);
 
+/** Mission control only shows feed activity this recent (GANG_FEED_HOURS, default 6h). */
+export const FEED_MAX_AGE_MS = Math.max(1, Number(process.env.GANG_FEED_HOURS) || 6) * 3_600_000;
+
+/** Keep only feed entries within the recency window — what mission control shows on load/reconnect. */
+export function recentFeed<T extends { ts?: number }>(feed: T[], now: number, maxAgeMs = FEED_MAX_AGE_MS): T[] {
+  const cutoff = now - maxAgeMs;
+  return feed.filter((e) => typeof e.ts === "number" && e.ts >= cutoff);
+}
+
 export interface GuiServer {
   /** Push an event to every connected browser (SSE). */
   broadcast(event: Record<string, unknown>): void;

@@ -17,6 +17,11 @@ import {
   remainOnExitArgs,
   tiledLayoutArgs,
   memberCommand,
+  listPanesArgs,
+  killPaneArgs,
+  killSessionArgs,
+  parsePaneList,
+  type PaneState,
 } from "./tmux.ts";
 import { FeedClient } from "./feed-client.ts";
 import { GUI_PORT } from "../intercom/gui/server.js";
@@ -34,6 +39,7 @@ const COMMAND_COMPLETIONS: AutocompleteItem[] = [
   { value: "name ", label: "name", description: "Show or set this session's own name" },
   { value: "spawn ", label: "spawn", description: "Spawn a member: spawn [@name] [-t <level>] <task>" },
   { value: "list", label: "list", description: "Show spawned members" },
+  { value: "clean", label: "clean", description: "Reap finished panes (clean all = stop everything)" },
 ];
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
@@ -140,6 +146,10 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function count(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
 function taskFileContent(role: string, task: string, orchestrator: string): string {
   return [
     `Task: ${task}`,
@@ -214,6 +224,40 @@ export default function gangExtension(pi: ExtensionAPI) {
     return member;
   }
 
+  /**
+   * Reap finished members. Default: kill dead panes (pi process exited but remain-on-exit kept the
+   * pane) and prune them from the roster, leaving running members alone. `all`: kill the whole gang
+   * session — stops everything.
+   */
+  async function cleanGang(opts: { all?: boolean } = {}): Promise<string> {
+    let panes: PaneState[];
+    try {
+      panes = parsePaneList(await runTmux(listPanesArgs()));
+    } catch {
+      // No gang session → nothing live. Sync the roster so /gang list matches reality.
+      const dropped = roster.list().length;
+      roster.clear();
+      return dropped ? `No gang session — cleared ${count(dropped, "stale member")} from the roster.` : "No gang session — nothing to clean.";
+    }
+
+    if (opts.all) {
+      await runTmux(killSessionArgs()).catch(() => {});
+      const stopped = roster.list().length;
+      roster.clear();
+      return `Stopped the gang: killed ${count(panes.length, "pane")}, cleared ${count(stopped, "member")}.`;
+    }
+
+    const dead = panes.filter((p) => p.dead);
+    for (const p of dead) await runTmux(killPaneArgs(p.paneId)).catch(() => {});
+    const alive = new Set(panes.filter((p) => !p.dead).map((p) => p.paneId));
+    const pruned = roster.prune(alive);
+    const running = roster.list().length;   // not alive.size — that counts the session's idle shell pane too
+    if (dead.length === 0 && pruned === 0) {
+      return `Nothing to reap — ${count(running, "member")} still running.`;
+    }
+    return `Reaped ${count(dead.length, "finished pane")}, pruned ${pruned} from the roster. ${count(running, "member")} still running.`;
+  }
+
   function formatRoster(): string {
     const members = roster.list();
     const watch = `Watch live: tmux attach -t ${GANG_SESSION}`;
@@ -270,12 +314,13 @@ Usage:
   gang({ action: "spawn", task: "..." })                                       → launch a member (auto-named m1, m2, …)
   gang({ action: "spawn", task: "...", role: "reviewer", thinking: "high" })   → launch with an explicit name
   gang({ action: "list" })                                                     → show the members you've spawned
+  gang({ action: "clean" })                                                    → reap finished panes + prune the roster
   gang({ action: "name", name: "boss of private evals" })                      → name this agent/session
 
 Only "task" is required for spawn. spawn returns immediately. The member runs its own pi session in a tmux pane (watch: tmux attach -t ${GANG_SESSION}). When done it sends its result back to you ("boss") as an intercom message — it does NOT return here. Keep working; handle the result when it arrives.`,
     promptSnippet: `Spawn visible subagent members in tmux panes (gang spawn with a task; role/name is optional and auto-assigned), list them (gang list), or name the current agent/session (gang name). When you spin up a teammate or need a specific identity, name yourself first with gang({ action: "name", name: "<clear role/name>" }). Spawn results return asynchronously as intercom messages, not tool results.`,
     parameters: Type.Object({
-      action: Type.String({ description: "'spawn', 'list', or 'name'" }),
+      action: Type.String({ description: "'spawn', 'list', 'clean', or 'name'" }),
       role: Type.Optional(Type.String({ description: "Optional name/role for the spawned member, e.g. 'reviewer'. Auto-assigned (m1, m2, …) if omitted; the member usually renames itself." })),
       task: Type.Optional(Type.String({ description: "What the member should do (required for spawn)" })),
       thinking: Type.Optional(Type.String({ description: "Optional Pi thinking level for spawn: off, minimal, low, medium, high, or xhigh" })),
@@ -300,6 +345,9 @@ Only "task" is required for spawn. spawn returns immediately. The member runs it
       if (action === "list") {
         return { content: [{ type: "text", text: formatRoster() }], isError: false };
       }
+      if (action === "clean") {
+        return { content: [{ type: "text", text: await cleanGang() }], isError: false };
+      }
       if (action === "name") {
         const nextName = typeof params.name === "string" ? params.name.trim() : "";
         if (!nextName) {
@@ -310,7 +358,7 @@ Only "task" is required for spawn. spawn returns immediately. The member runs it
         orchestratorName = nextName;
         return { content: [{ type: "text", text: `Agent name set: ${nextName}` }], isError: false, details: { name: nextName } };
       }
-      return { content: [{ type: "text", text: `Unknown action "${action}". Use 'spawn', 'list', or 'name'.` }], isError: true, details: { error: true } };
+      return { content: [{ type: "text", text: `Unknown action "${action}". Use 'spawn', 'list', 'clean', or 'name'.` }], isError: true, details: { error: true } };
     },
   });
 
@@ -350,6 +398,10 @@ Only "task" is required for spawn. spawn returns immediately. The member runs it
         say(formatRoster(), "info");
         return;
       }
+      if (trimmed === "clean" || trimmed === "clean all") {
+        say(await cleanGang({ all: trimmed === "clean all" }), "info");
+        return;
+      }
       if (trimmed.startsWith("spawn")) {
         const parsed = parseSpawnCommand(trimmed.slice("spawn".length));
         if (!parsed.ok) {
@@ -366,7 +418,7 @@ Only "task" is required for spawn. spawn returns immediately. The member runs it
         }
         return;
       }
-      say(`Unknown gang command "${trimmed}". Use /gang, /gang list, /gang url, /gang name <name>, /gang watch, or /gang spawn [@name] [-t <level>] <task>.`, "warning");
+      say(`Unknown gang command "${trimmed}". Use /gang, /gang list, /gang clean [all], /gang url, /gang name <name>, /gang watch, or /gang spawn [@name] [-t <level>] <task>.`, "warning");
     },
   });
 
