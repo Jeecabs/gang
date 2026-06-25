@@ -31,7 +31,8 @@ const INTERCOM_INDEX = join(GANG_DIR, "..", "intercom", "index.ts");
 const COMMAND_COMPLETIONS: AutocompleteItem[] = [
   { value: "watch", label: "watch", description: "Open mission control" },
   { value: "url", label: "url", description: "Show browser mission-control URL" },
-  { value: "boss ", label: "boss", description: "Show or set this session's supervisor name" },
+  { value: "name ", label: "name", description: "Show or set this session's own name" },
+  { value: "boss ", label: "boss", description: "Alias for name" },
   { value: "spawn ", label: "spawn", description: "Spawn a member: spawn <role> <task>" },
   { value: "list", label: "list", description: "Show spawned members" },
 ];
@@ -147,6 +148,8 @@ function taskFileContent(role: string, task: string, orchestrator: string): stri
     `Task: ${task}`,
     "",
     `You are "${role}", a member of a gang supervised by "${orchestrator}". Work autonomously.`,
+    "If you spawn a teammate or your role needs more specificity, name yourself first with the gang tool:",
+    "  gang({ action: \"name\", name: \"<clear role/name>\" })",
     "When you are finished, send your result to your supervisor with the intercom tool:",
     `  intercom({ action: "send", to: "${orchestrator}", message: "<your result>" })`,
     "If you get blocked and need a decision, use the contact_supervisor tool instead.",
@@ -266,14 +269,16 @@ export default function gangExtension(pi: ExtensionAPI) {
 Usage:
   gang({ action: "spawn", role: "worker", task: "...", thinking: "high" })  → launch a member in a tmux pane
   gang({ action: "list" })                                                       → show the members you've spawned
+  gang({ action: "name", name: "boss of private evals" })                       → name this agent/session
 
 spawn returns immediately. The member runs its own pi session in a tmux pane (watch: tmux attach -t ${GANG_SESSION}). When done it sends its result back to you ("boss") as an intercom message — it does NOT return here. Keep working; handle the result when it arrives.`,
-    promptSnippet: `Spawn visible subagent members in tmux panes (gang spawn role/task) and list them (gang list). Results return asynchronously as intercom messages, not tool results.`,
+    promptSnippet: `Spawn visible subagent members in tmux panes (gang spawn role/task), list them (gang list), or name the current agent/session (gang name). When you spin up a teammate or need a specific identity, name yourself first with gang({ action: "name", name: "<clear role/name>" }). Spawn results return asynchronously as intercom messages, not tool results.`,
     parameters: Type.Object({
-      action: Type.String({ description: "'spawn' or 'list'" }),
+      action: Type.String({ description: "'spawn', 'list', or 'name'" }),
       role: Type.Optional(Type.String({ description: "Member role/name for spawn, e.g. 'worker', 'reviewer'" })),
       task: Type.Optional(Type.String({ description: "What the member should do (for spawn)" })),
       thinking: Type.Optional(Type.String({ description: "Optional Pi thinking level for spawn: off, minimal, low, medium, high, or xhigh" })),
+      name: Type.Optional(Type.String({ description: "New name for this agent/session when action='name'" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const action = params.action;
@@ -293,7 +298,17 @@ spawn returns immediately. The member runs its own pi session in a tmux pane (wa
       if (action === "list") {
         return { content: [{ type: "text", text: formatRoster() }], isError: false };
       }
-      return { content: [{ type: "text", text: `Unknown action "${action}". Use 'spawn' or 'list'.` }], isError: true, details: { error: true } };
+      if (action === "name") {
+        const nextName = typeof params.name === "string" ? params.name.trim() : "";
+        if (!nextName) {
+          const currentName = pi.getSessionName()?.trim() || orchestratorName;
+          return { content: [{ type: "text", text: `Agent name: ${currentName}` }], isError: false };
+        }
+        pi.setSessionName(nextName);
+        orchestratorName = nextName;
+        return { content: [{ type: "text", text: `Agent name set: ${nextName}` }], isError: false, details: { name: nextName } };
+      }
+      return { content: [{ type: "text", text: `Unknown action "${action}". Use 'spawn', 'list', or 'name'.` }], isError: true, details: { error: true } };
     },
   });
 
@@ -313,20 +328,21 @@ spawn returns immediately. The member runs its own pi session in a tmux pane (wa
         say(`Mission control: ${missionControlUrl()}`, "info");
         return;
       }
-      if (trimmed === "boss") {
+      if (trimmed === "name" || trimmed === "boss") {
         orchestratorName = pi.getSessionName()?.trim() || orchestratorName;
-        say(`Supervisor name: ${orchestratorName}`, "info");
+        say(`Agent name: ${orchestratorName}`, "info");
         return;
       }
-      if (trimmed.startsWith("boss ")) {
-        const nextName = trimmed.slice("boss".length).trim();
+      if (trimmed.startsWith("name ") || trimmed.startsWith("boss ")) {
+        const command = trimmed.startsWith("name ") ? "name" : "boss";
+        const nextName = trimmed.slice(command.length).trim();
         if (!nextName) {
-          say("Usage: /gang boss <name>", "warning");
+          say(`Usage: /gang ${command} <name>`, "warning");
           return;
         }
         orchestratorName = nextName;
         pi.setSessionName(nextName);
-        say(`Supervisor name set: ${nextName}`, "info");
+        say(`Agent name set: ${nextName}`, "info");
         return;
       }
       if (trimmed === "" || trimmed === "list") {
@@ -349,7 +365,7 @@ spawn returns immediately. The member runs its own pi session in a tmux pane (wa
         }
         return;
       }
-      say(`Unknown gang command "${trimmed}". Use /gang, /gang list, /gang url, /gang boss <name>, /gang watch, or /gang spawn [--thinking <level>] <role> <task>.`, "warning");
+      say(`Unknown gang command "${trimmed}". Use /gang, /gang list, /gang url, /gang name <name>, /gang watch, or /gang spawn [--thinking <level>] <role> <task>.`, "warning");
     },
   });
 
