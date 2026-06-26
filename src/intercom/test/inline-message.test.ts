@@ -30,7 +30,7 @@ const message: Message = {
 };
 
 test("inline intercom messages render at the available terminal width", () => {
-  const component = new InlineMessageComponent(from, message, theme as any);
+  const component = new InlineMessageComponent(from, message, theme);
 
   const lines = component.render(120);
 

@@ -3,14 +3,16 @@ import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { SessionInfo, Message } from "../types.js";
 
+type InlineMessageTheme = Pick<Theme, "fg">;
+
 export class InlineMessageComponent implements Component {
   private from: SessionInfo;
   private message: Message;
-  private theme: Theme;
+  private theme: InlineMessageTheme;
   private replyCommand?: string;
   private bodyText?: string;
 
-  constructor(from: SessionInfo, message: Message, theme: Theme, replyCommand?: string, bodyText?: string) {
+  constructor(from: SessionInfo, message: Message, theme: InlineMessageTheme, replyCommand?: string, bodyText?: string) {
     this.from = from;
     this.message = message;
     this.theme = theme;
