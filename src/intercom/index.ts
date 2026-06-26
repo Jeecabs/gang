@@ -463,14 +463,14 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
   } | null = null;
   function waitForReply(from: string, replyTo: string, signal?: AbortSignal): Promise<Message> {
     if (replyWaiter) {
-      return Promise.reject(new Error("Already waiting for a reply"));
+      throw new Error("Already waiting for a reply");
     }
     if (signal?.aborted) {
-      return Promise.reject(new Error("Cancelled"));
+      throw new Error("Cancelled");
     }
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        rejectReplyWaiter(new Error(`No reply from "${from}" within 10 minutes`));
+        rejectReplyWaiter(new Error(`No reply from "${from}" within 10 minutes`), replyTo);
       }, 10 * 60 * 1000);
       const cleanup = () => {
         clearTimeout(timeout);
@@ -498,7 +498,10 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       };
     });
   }
-  function rejectReplyWaiter(error: Error): void {
+  function rejectReplyWaiter(error: Error, replyTo?: string): void {
+    if (replyTo && replyWaiter?.replyTo !== replyTo) {
+      return;
+    }
     replyWaiter?.reject(error);
   }
   function clearReconnectTimer(): void {
@@ -1200,23 +1203,13 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
           };
         }
 
+        let questionId: string | null = null;
         let replyPromise: Promise<Message> | null = null;
         try {
-          const questionId = randomUUID();
+          questionId = randomUUID();
           replyPromise = waitForReply(sendTo, questionId, signal);
           replyPromise.catch(() => undefined);
-          if (signal?.aborted) {
-            rejectReplyWaiter(new Error("Cancelled"));
-            try {
-              await replyPromise;
-            } catch {
-              // The waiter was intentionally rejected above; the tool result reports cancellation.
-            }
-            return {
-              content: [{ type: "text", text: "Cancelled" }],
-              details: { error: true },
-            };
-          }
+          // Abort is handled by the pre-check above and by waitForReply throwing on an aborted signal.
           let requestText: string;
           if (reason === "interview_request") {
             if (!supervisorInterview) {
@@ -1233,7 +1226,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
           });
           if (!sendResult.delivered) {
             const errorText = sendResult.reason ?? "Session may not exist or has disconnected.";
-            rejectReplyWaiter(new Error(`Message to "${metadata.orchestratorTarget}" was not delivered: ${errorText}`));
+            rejectReplyWaiter(new Error(`Message to "${metadata.orchestratorTarget}" was not delivered: ${errorText}`), questionId);
             if (replyPromise) {
               try {
                 await replyPromise;
@@ -1281,7 +1274,9 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
               : undefined,
           };
         } catch (error) {
-          rejectReplyWaiter(toError(error));
+          if (questionId) {
+            rejectReplyWaiter(toError(error), questionId);
+          }
           if (replyPromise) {
             try {
               await replyPromise;
@@ -1512,6 +1507,7 @@ Usage:
               details: { error: true },
             };
           }
+          let questionId: string | null = null;
           let replyPromise: Promise<Message> | null = null;
 
           try {
@@ -1528,8 +1524,9 @@ Usage:
                 details: { error: true },
               };
             }
-            const questionId = randomUUID();
+            questionId = randomUUID();
             replyPromise = waitForReply(sendTo, questionId, _signal);
+            replyPromise.catch(() => undefined);
             const sendResult = await connectedClient.send(sendTo, {
               messageId: questionId,
               text: message,
@@ -1540,7 +1537,7 @@ Usage:
 
             if (!sendResult.delivered) {
               const errorText = sendResult.reason ?? "Session may not exist or has disconnected.";
-              rejectReplyWaiter(new Error(`Message to "${to}" was not delivered: ${errorText}`));
+              rejectReplyWaiter(new Error(`Message to "${to}" was not delivered: ${errorText}`), questionId);
               if (replyPromise) {
                 try {
                   await replyPromise;
@@ -1575,7 +1572,9 @@ Usage:
               details: undefined,
             };
           } catch (error) {
-            rejectReplyWaiter(toError(error));
+            if (questionId) {
+              rejectReplyWaiter(toError(error), questionId);
+            }
             if (replyPromise) {
               try {
                 await replyPromise;
