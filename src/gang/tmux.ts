@@ -22,12 +22,13 @@ export function newSessionArgs(session = GANG_SESSION): string[] {
 }
 
 /**
- * Split a new pane and print its pane id (`-P -F '#{pane_id}'`). With `session`, split inside that
- * session; without it, split the *current* window (tmux uses $TMUX to find the active pane). `detached`
- * adds `-d` so the new pane doesn't steal focus from the caller's pane (keeps you driving pi).
+ * Split a new pane and print its pane id (`-P -F '#{pane_id}'`). `target` is what to split: a session
+ * (e.g. `gang`) or a specific pane id (e.g. pi's own `$TMUX_PANE`, to split alongside the caller).
+ * Without a target, tmux splits whatever window is *currently active* — so always pass one to be
+ * deterministic. `detached` adds `-d` so the new pane doesn't steal focus (keeps you driving pi).
  */
-export function splitArgs(opts: { session?: string; cwd: string; env: Record<string, string>; command: string; detached?: boolean }): string[] {
-  const target = opts.session ? ["-t", opts.session] : [];
+export function splitArgs(opts: { target?: string; cwd: string; env: Record<string, string>; command: string; detached?: boolean }): string[] {
+  const target = opts.target ? ["-t", opts.target] : [];
   return [
     "split-window",
     ...target,
@@ -47,10 +48,9 @@ export function remainOnExitArgs(paneId: string): string[] {
   return ["set-option", "-p", "-t", paneId, "remain-on-exit", "on"];
 }
 
-/** Re-tile so every member pane stays visible as the gang grows. No session → the current window. */
-export function tiledLayoutArgs(session?: string): string[] {
-  const target = session ? ["-t", session] : [];
-  return ["select-layout", ...target, "tiled"];
+/** Re-tile so every member pane stays visible as the gang grows. Target a session or a pane's window. */
+export function tiledLayoutArgs(target: string = GANG_SESSION): string[] {
+  return ["select-layout", "-t", target, "tiled"];
 }
 
 /** Focus a member's pane (Phase 5 GUI click-to-focus). */
