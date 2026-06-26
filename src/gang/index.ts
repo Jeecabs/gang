@@ -18,6 +18,7 @@ import {
   tiledLayoutArgs,
   memberCommand,
   listPanesArgs,
+  listAllPanesArgs,
   killPaneArgs,
   killSessionArgs,
   parsePaneList,
@@ -182,6 +183,9 @@ function defaultBossName(cwd = process.cwd()): string {
 export default function gangExtension(pi: ExtensionAPI) {
   const roster = new Roster();
   let orchestratorName = ORCHESTRATOR;
+  // When pi itself runs inside tmux, members split into the user's current window (visible at once);
+  // otherwise they go to a dedicated detached `gang` session you attach to. Fixed per boss process.
+  const inTmux = !!process.env.TMUX;
 
   async function runTmux(args: string[]): Promise<string> {
     const { stdout } = await execFileP(TMUX_BIN, args);
@@ -225,11 +229,13 @@ export default function gangExtension(pi: ExtensionAPI) {
     const env = { PATH: process.env.PATH ?? "", ...buildMemberEnv({ role, runId: roster.runId, index, orchestrator: orchestratorName }) };
     const command = memberCommand({ role, taskFile, intercomIndex: INTERCOM_INDEX, gangIndex: GANG_INDEX, thinkingLevel });
 
-    await ensureGangSession();
-    const paneId = await runTmux(splitArgs({ session: GANG_SESSION, cwd, env, command }));
+    if (!inTmux) await ensureGangSession();
+    const paneId = await runTmux(
+      splitArgs(inTmux ? { cwd, env, command, detached: true } : { session: GANG_SESSION, cwd, env, command }),
+    );
     // Best-effort polish; failures here must not lose the (already launched) member.
     await runTmux(remainOnExitArgs(paneId)).catch(() => {});
-    await runTmux(tiledLayoutArgs()).catch(() => {});
+    await runTmux(tiledLayoutArgs(inTmux ? undefined : GANG_SESSION)).catch(() => {});
 
     const member: Member = { role, task, index, paneId, runId: roster.runId, spawnedAt: Date.now(), thinkingLevel };
     roster.add(member);
@@ -238,25 +244,41 @@ export default function gangExtension(pi: ExtensionAPI) {
 
   /**
    * Reap finished members. Default: kill dead panes (pi process exited but remain-on-exit kept the
-   * pane) and prune them from the roster, leaving running members alone. `all`: kill the whole gang
-   * session — stops everything.
+   * pane) and prune them from the roster, leaving running members alone. `all`: stop every member
+   * (kill-session when detached; kill each member pane when pi runs inside tmux).
    */
   async function cleanGang(opts: { all?: boolean } = {}): Promise<string> {
+    // Find the member panes. In-tmux they live among the user's own panes, so locate them by roster
+    // pane id server-wide; detached mode lists the dedicated session.
     let panes: PaneState[];
-    try {
-      panes = parsePaneList(await runTmux(listPanesArgs()));
-    } catch {
-      // No gang session → nothing live. Sync the roster so /gang list matches reality.
-      const dropped = roster.list().length;
-      roster.clear();
-      return dropped ? `No gang session — cleared ${count(dropped, "stale member")} from the roster.` : "No gang session — nothing to clean.";
+    if (inTmux) {
+      const ids = new Set(roster.list().map((m) => m.paneId));
+      if (ids.size === 0) return "No gang members to clean.";
+      try {
+        panes = parsePaneList(await runTmux(listAllPanesArgs())).filter((p) => ids.has(p.paneId));
+      } catch {
+        const dropped = roster.list().length;
+        roster.clear();
+        return `Cleared ${count(dropped, "stale member")} from the roster.`;
+      }
+    } else {
+      try {
+        panes = parsePaneList(await runTmux(listPanesArgs()));
+      } catch {
+        // No gang session → nothing live. Sync the roster so /gang list matches reality.
+        const dropped = roster.list().length;
+        roster.clear();
+        return dropped ? `No gang session — cleared ${count(dropped, "stale member")} from the roster.` : "No gang session — nothing to clean.";
+      }
     }
 
     if (opts.all) {
-      await runTmux(killSessionArgs()).catch(() => {});
+      // In-tmux: kill member panes individually — never kill-session, that would take down the user's pi.
+      if (inTmux) for (const p of panes) await runTmux(killPaneArgs(p.paneId)).catch(() => {});
+      else await runTmux(killSessionArgs()).catch(() => {});
       const stopped = roster.list().length;
       roster.clear();
-      return `Stopped the gang: killed ${count(panes.length, "pane")}, cleared ${count(stopped, "member")}.`;
+      return `Stopped the gang: killed ${count(panes.length, inTmux ? "member pane" : "pane")}, cleared ${count(stopped, "member")}.`;
     }
 
     const dead = panes.filter((p) => p.dead);
@@ -270,9 +292,14 @@ export default function gangExtension(pi: ExtensionAPI) {
     return `Reaped ${count(dead.length, "finished pane")}, pruned ${pruned} from the roster. ${count(running, "member")} still running.`;
   }
 
+  // Where to look for members: in-tmux they're splits in the current window; else the detached session.
+  function watchHint(): string {
+    return inTmux ? "Members are splits in your current tmux window." : `Watch live: tmux attach -t ${GANG_SESSION}`;
+  }
+
   function formatRoster(): string {
     const members = roster.list();
-    const watch = `Watch live: tmux attach -t ${GANG_SESSION}`;
+    const watch = watchHint();
     if (members.length === 0) {
       return `No gang members spawned yet (run ${roster.runId.slice(0, 8)}). Use \`/gang spawn <task>\` to launch one.`;
     }
@@ -286,9 +313,10 @@ export default function gangExtension(pi: ExtensionAPI) {
 
   function spawnedMessage(m: Member): string {
     const thinking = m.thinkingLevel ? ` with ${m.thinkingLevel} thinking` : "";
+    const where = inTmux ? "split into your current window" : `session: ${GANG_SESSION}`;
     return [
-      `Launched member "${m.role}"${thinking} in tmux pane ${m.paneId} (session: ${GANG_SESSION}).`,
-      `Watch live: tmux attach -t ${GANG_SESSION}`,
+      `Launched member "${m.role}"${thinking} in tmux pane ${m.paneId} (${where}).`,
+      watchHint(),
       `Its result will arrive here as an intercom message from "${m.role}" — keep working; don't block on it.`,
     ].join("\n");
   }
@@ -422,7 +450,7 @@ Only "task" is required for spawn. spawn returns immediately. The member runs it
           orchestratorName = pi.getSessionName()?.trim() || orchestratorName;
           const member = await spawnMember(parsed.task, ctx.cwd ?? process.cwd(), { name: parsed.name, thinkingLevel: parsed.thinkingLevel });
           const thinking = member.thinkingLevel ? ` (${member.thinkingLevel} thinking)` : "";
-          say(`Launched "${member.role}"${thinking} in pane ${member.paneId}. Watch: tmux attach -t ${GANG_SESSION}`, "info");
+          say(`Launched "${member.role}"${thinking} in pane ${member.paneId}. ${watchHint()}`, "info");
         } catch (error) {
           say(`gang spawn failed: ${getErrorMessage(error)}`, "error");
         }

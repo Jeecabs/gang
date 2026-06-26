@@ -21,12 +21,17 @@ export function newSessionArgs(session = GANG_SESSION): string[] {
   return ["new-session", "-d", "-s", session, "-x", "220", "-y", "50"];
 }
 
-/** Split a new pane in the session and print its pane id (`-P -F '#{pane_id}'`). */
-export function splitArgs(opts: { session?: string; cwd: string; env: Record<string, string>; command: string }): string[] {
+/**
+ * Split a new pane and print its pane id (`-P -F '#{pane_id}'`). With `session`, split inside that
+ * session; without it, split the *current* window (tmux uses $TMUX to find the active pane). `detached`
+ * adds `-d` so the new pane doesn't steal focus from the caller's pane (keeps you driving pi).
+ */
+export function splitArgs(opts: { session?: string; cwd: string; env: Record<string, string>; command: string; detached?: boolean }): string[] {
   const target = opts.session ? ["-t", opts.session] : [];
   return [
     "split-window",
     ...target,
+    ...(opts.detached ? ["-d"] : []),
     "-P",
     "-F",
     "#{pane_id}",
@@ -42,9 +47,10 @@ export function remainOnExitArgs(paneId: string): string[] {
   return ["set-option", "-p", "-t", paneId, "remain-on-exit", "on"];
 }
 
-/** Re-tile so every member pane stays visible as the gang grows. */
-export function tiledLayoutArgs(session = GANG_SESSION): string[] {
-  return ["select-layout", "-t", session, "tiled"];
+/** Re-tile so every member pane stays visible as the gang grows. No session → the current window. */
+export function tiledLayoutArgs(session?: string): string[] {
+  const target = session ? ["-t", session] : [];
+  return ["select-layout", ...target, "tiled"];
 }
 
 /** Focus a member's pane (Phase 5 GUI click-to-focus). */
@@ -55,6 +61,11 @@ export function selectPaneArgs(paneId: string): string[] {
 /** List every pane in the session with its dead flag: lines of `#{pane_id} #{pane_dead}`. */
 export function listPanesArgs(session = GANG_SESSION): string[] {
   return ["list-panes", "-t", session, "-F", "#{pane_id} #{pane_dead}"];
+}
+
+/** Server-wide pane list (`-a`) — for in-tmux mode, where members live in the user's own windows. */
+export function listAllPanesArgs(): string[] {
+  return ["list-panes", "-a", "-F", "#{pane_id} #{pane_dead}"];
 }
 
 /** Reap one finished pane (a member whose pi process exited but remain-on-exit kept it). */
