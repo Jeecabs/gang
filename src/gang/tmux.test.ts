@@ -7,7 +7,7 @@ test("envFlags emits one -e KEY=VAL pair per var", () => {
 });
 
 test("splitArgs prints the new pane id and sets cwd + env", () => {
-  const args = splitArgs({ session: "gang", cwd: "/repo", env: { PI_SUBAGENT_RUN_ID: "r1" }, command: "pi --name worker @/t.md" });
+  const args = splitArgs({ target: "gang", cwd: "/repo", env: { PI_SUBAGENT_RUN_ID: "r1" }, command: "pi --name worker @/t.md" });
   assert.deepEqual(args, [
     "split-window", "-t", "gang", "-P", "-F", "#{pane_id}",
     "-c", "/repo", "-e", "PI_SUBAGENT_RUN_ID=r1", "pi --name worker @/t.md",
@@ -17,15 +17,16 @@ test("splitArgs prints the new pane id and sets cwd + env", () => {
 test("session + layout + remain-on-exit builders target the gang session/pane", () => {
   assert.deepEqual(newSessionArgs(), ["new-session", "-d", "-s", "gang", "-x", "220", "-y", "50"]);
   assert.deepEqual(tiledLayoutArgs("gang"), ["select-layout", "-t", "gang", "tiled"]);
+  assert.deepEqual(tiledLayoutArgs(), ["select-layout", "-t", "gang", "tiled"]); // default = gang session, never the live window
   assert.deepEqual(remainOnExitArgs("%3"), ["set-option", "-p", "-t", "%3", "remain-on-exit", "on"]);
 });
 
-test("in-tmux builders drop the session target so tmux acts on the current window", () => {
-  // No session → split the current window; detached keeps focus on the caller's (pi) pane.
-  assert.deepEqual(splitArgs({ cwd: "/repo", env: { A: "1" }, command: "pi", detached: true }), [
-    "split-window", "-d", "-P", "-F", "#{pane_id}", "-c", "/repo", "-e", "A=1", "pi",
+test("in-tmux builders target pi's own pane so members land in pi's window", () => {
+  // -t <pane> splits pi's pane (not whatever window is active); -d keeps focus on the caller's (pi) pane.
+  assert.deepEqual(splitArgs({ target: "%0", cwd: "/repo", env: { A: "1" }, command: "pi", detached: true }), [
+    "split-window", "-t", "%0", "-d", "-P", "-F", "#{pane_id}", "-c", "/repo", "-e", "A=1", "pi",
   ]);
-  assert.deepEqual(tiledLayoutArgs(), ["select-layout", "tiled"]);
+  assert.deepEqual(tiledLayoutArgs("%0"), ["select-layout", "-t", "%0", "tiled"]);
   assert.deepEqual(listAllPanesArgs(), ["list-panes", "-a", "-F", "#{pane_id} #{pane_dead}"]);
 });
 

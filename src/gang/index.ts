@@ -183,9 +183,12 @@ function defaultBossName(cwd = process.cwd()): string {
 export default function gangExtension(pi: ExtensionAPI) {
   const roster = new Roster();
   let orchestratorName = ORCHESTRATOR;
-  // When pi itself runs inside tmux, members split into the user's current window (visible at once);
-  // otherwise they go to a dedicated detached `gang` session you attach to. Fixed per boss process.
-  const inTmux = !!process.env.TMUX;
+  // When pi itself runs inside tmux (and exposes its pane via $TMUX_PANE), members split into pi's own
+  // window — visible alongside pi; otherwise they go to a dedicated detached `gang` session you attach
+  // to. Gate on TMUX_PANE so we always have a concrete pane to target (a no-`-t` split lands in whatever
+  // window is *currently active*, not pi's); no pane → fall back to detached. Fixed per boss process.
+  const tmuxPane = process.env.TMUX_PANE ?? "";
+  const inTmux = !!process.env.TMUX && !!tmuxPane;
 
   async function runTmux(args: string[]): Promise<string> {
     const { stdout } = await execFileP(TMUX_BIN, args);
@@ -230,16 +233,39 @@ export default function gangExtension(pi: ExtensionAPI) {
     const command = memberCommand({ role, taskFile, intercomIndex: INTERCOM_INDEX, gangIndex: GANG_INDEX, thinkingLevel });
 
     if (!inTmux) await ensureGangSession();
-    const paneId = await runTmux(
-      splitArgs(inTmux ? { cwd, env, command, detached: true } : { session: GANG_SESSION, cwd, env, command }),
-    );
-    // Best-effort polish; failures here must not lose the (already launched) member.
-    await runTmux(remainOnExitArgs(paneId)).catch(() => {});
-    await runTmux(tiledLayoutArgs(inTmux ? undefined : GANG_SESSION)).catch(() => {});
-
+    let paneId: string;
+    try {
+      paneId = await runTmux(
+        splitArgs(inTmux ? { target: tmuxPane, cwd, env, command, detached: true } : { target: GANG_SESSION, cwd, env, command }),
+      );
+    } catch (error) {
+      // In-tmux we split the user's real (bounded) window; a full window rejects with a raw tmux error.
+      if (inTmux) throw new Error(`tmux couldn't add a pane (${getErrorMessage(error)}) — your tmux window may be full. Close a pane or run \`/gang clean\`, then retry.`);
+      throw error;
+    }
     const member: Member = { role, task, index, paneId, runId: roster.runId, spawnedAt: Date.now(), thinkingLevel };
     roster.add(member);
+    // Best-effort polish; failures here must not lose the (already-tracked) member.
+    await runTmux(remainOnExitArgs(paneId)).catch(() => {});
+    if (inTmux) {
+      // Re-tile only when pi's window holds nothing but gang panes — never reshuffle the user's own panes.
+      if (await windowIsGangOnly(tmuxPane)) await runTmux(tiledLayoutArgs(tmuxPane)).catch(() => {});
+    } else {
+      await runTmux(tiledLayoutArgs(GANG_SESSION)).catch(() => {});
+    }
     return member;
+  }
+
+  // True when every pane sharing `pane`'s window is pi's own pane or a tracked gang member — i.e.
+  // re-tiling that window won't disturb any of the user's own panes. Best-effort: unknown → false.
+  async function windowIsGangOnly(pane: string): Promise<boolean> {
+    try {
+      const inWindow = parsePaneList(await runTmux(listPanesArgs(pane)));
+      const allowed = new Set([pane, ...roster.list().map((m) => m.paneId)]);
+      return inWindow.every((p) => allowed.has(p.paneId));
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -256,10 +282,9 @@ export default function gangExtension(pi: ExtensionAPI) {
       if (ids.size === 0) return "No gang members to clean.";
       try {
         panes = parsePaneList(await runTmux(listAllPanesArgs())).filter((p) => ids.has(p.paneId));
-      } catch {
-        const dropped = roster.list().length;
-        roster.clear();
-        return `Cleared ${count(dropped, "stale member")} from the roster.`;
+      } catch (error) {
+        // A failed listing ≠ members are gone — keep the roster so we don't lose track of live panes.
+        return `Couldn't list tmux panes (${getErrorMessage(error)}); roster left intact (${count(ids.size, "member")}).`;
       }
     } else {
       try {
@@ -274,6 +299,9 @@ export default function gangExtension(pi: ExtensionAPI) {
 
     if (opts.all) {
       // In-tmux: kill member panes individually — never kill-session, that would take down the user's pi.
+      // Only this boss's direct members are reaped; a sub-member a member spawned lives in that member's
+      // own roster, so killing the member's pane orphans it. Use detached mode (kill-session tears down
+      // the whole tree) when you need a guaranteed full stop.
       if (inTmux) for (const p of panes) await runTmux(killPaneArgs(p.paneId)).catch(() => {});
       else await runTmux(killSessionArgs()).catch(() => {});
       const stopped = roster.list().length;
@@ -355,7 +383,7 @@ Usage:
   gang({ action: "clean" })                                                    → reap finished panes + prune the roster
   gang({ action: "name", name: "boss of private evals" })                      → name this agent/session
 
-Only "task" is required for spawn. spawn returns immediately. The member runs its own pi session in a tmux pane (watch: tmux attach -t ${GANG_SESSION}). When done it sends its result back to you ("boss") as an intercom message — it does NOT return here. Keep working; handle the result when it arrives.`,
+Only "task" is required for spawn. spawn returns immediately. The member runs its own pi session in a tmux pane (${inTmux ? "split into your current window" : `watch: tmux attach -t ${GANG_SESSION}`}). When done it sends its result back to you ("boss") as an intercom message — it does NOT return here. Keep working; handle the result when it arrives.`,
     promptSnippet: `Spawn visible subagent members in tmux panes (gang spawn with a task; role/name is optional and auto-assigned), list them (gang list), or name the current agent/session (gang name). When you spin up a teammate or need a specific identity, name yourself first with gang({ action: "name", name: "<clear role/name>" }). Spawn results return asynchronously as intercom messages, not tool results.`,
     parameters: Type.Object({
       action: Type.String({ description: "'spawn', 'list', 'clean', or 'name'" }),
