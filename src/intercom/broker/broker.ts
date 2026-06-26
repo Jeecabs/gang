@@ -1,5 +1,5 @@
 import net from "net";
-import { writeFileSync, unlinkSync, mkdirSync } from "fs";
+import { chmodSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { randomUUID } from "crypto";
@@ -106,7 +106,8 @@ class IntercomBroker {
   private shutdownTimer: NodeJS.Timeout | null = null;
 
   constructor() {
-    mkdirSync(INTERCOM_DIR, { recursive: true });
+    mkdirSync(INTERCOM_DIR, { recursive: true, mode: 0o700 });
+    if (process.platform !== "win32") chmodSync(INTERCOM_DIR, 0o700);
     if (process.platform !== "win32") {
       try {
         unlinkSync(SOCKET_PATH);
@@ -125,7 +126,9 @@ class IntercomBroker {
 
   start(): void {
     this.server.listen(SOCKET_PATH, () => {
-      writeFileSync(PID_PATH, String(process.pid));
+      if (process.platform !== "win32") chmodSync(SOCKET_PATH, 0o600);
+      writeFileSync(PID_PATH, String(process.pid), { mode: 0o600 });
+      if (process.platform !== "win32") chmodSync(PID_PATH, 0o600);
       console.log(`Intercom broker started (pid: ${process.pid})`);
     });
     process.on("SIGTERM", () => this.shutdown());
@@ -213,8 +216,8 @@ class IntercomBroker {
       }
 
       case "unregister": {
-        this.sessions.delete(currentId);
-        this.broadcast({ type: "session_left", sessionId: currentId }, currentId);
+        this.sessions.delete(currentId!);
+        this.broadcast({ type: "session_left", sessionId: currentId! }, currentId!);
         setId(null);
         this.scheduleShutdownCheck();
         break;
@@ -245,7 +248,7 @@ class IntercomBroker {
 
         const targets = this.findSessions(clientMessage.to);
         if (targets.length === 1) {
-          const fromSession = this.sessions.get(currentId);
+          const fromSession = this.sessions.get(currentId!);
           if (!fromSession) {
             writeMessage(socket, {
               type: "delivery_failed",
@@ -296,7 +299,7 @@ class IntercomBroker {
       }
 
       case "presence": {
-        const session = this.sessions.get(currentId);
+        const session = this.sessions.get(currentId!);
         if (session) {
           if (clientMessage.name !== undefined) {
             if (typeof clientMessage.name !== "string") {
@@ -317,7 +320,7 @@ class IntercomBroker {
             session.info.model = clientMessage.model;
           }
           session.info.lastActivity = Date.now();
-          this.broadcast({ type: "presence_update", session: session.info }, currentId);
+          this.broadcast({ type: "presence_update", session: session.info }, currentId!);
         }
         break;
       }

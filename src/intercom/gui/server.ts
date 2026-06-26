@@ -5,7 +5,15 @@ import { fileURLToPath } from "url";
 import type { SessionInfo } from "../types.js";
 
 const DASHBOARD = join(dirname(fileURLToPath(import.meta.url)), "dashboard.html");
-export const GUI_PORT = Number(process.env.GANG_GUI_PORT ?? 7717);
+const GUI_HOST = "127.0.0.1";
+const DEFAULT_GUI_PORT = 7717;
+
+export function parseGuiPort(value: unknown, fallback = DEFAULT_GUI_PORT): number {
+  const port = typeof value === "number" ? value : Number(value ?? fallback);
+  return Number.isInteger(port) && port >= 0 && port <= 65_535 ? port : fallback;
+}
+
+export const GUI_PORT = parseGuiPort(process.env.GANG_GUI_PORT);
 
 /** Mission control only shows feed activity this recent (GANG_FEED_HOURS, default 6h). */
 export const FEED_MAX_AGE_MS = Math.max(1, Number(process.env.GANG_FEED_HOURS) || 6) * 3_600_000;
@@ -34,7 +42,7 @@ export interface GuiSnapshot {
 
 export function startGuiServer(opts: { port?: number; getSnapshot: () => GuiSnapshot }): GuiServer {
   const clients = new Set<ServerResponse>();
-  const port = opts.port ?? GUI_PORT;
+  const port = parseGuiPort(opts.port, GUI_PORT);
 
   const server = createServer((req, res) => {
     if (req.url === "/" || req.url === "/index.html") {
@@ -67,7 +75,11 @@ export function startGuiServer(opts: { port?: number; getSnapshot: () => GuiSnap
   server.on("error", (err: NodeJS.ErrnoException) => {
     console.error(`Gang GUI disabled: ${err.message}`);
   });
-  server.listen(port, () => console.log(`Gang mission-control: http://localhost:${port}`));
+  server.listen(port, GUI_HOST, () => {
+    const address = server.address();
+    const actualPort = typeof address === "object" && address ? address.port : port;
+    console.log(`Gang mission-control: http://${GUI_HOST}:${actualPort}`);
+  });
 
   return {
     broadcast(event) {

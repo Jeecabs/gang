@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { EventEmitter, once } from "node:events";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { ReplyTracker } from "./reply-tracker.ts";
 import type { Message, SessionInfo } from "./types.ts";
 
@@ -30,7 +30,10 @@ process.on("exit", () => {
   rmSync(sharedHomeDir, { recursive: true, force: true });
 });
 
-async function waitForBrokerReady(broker: ChildProcessWithoutNullStreams): Promise<void> {
+async function waitForBrokerReady(broker: ChildProcess): Promise<void> {
+  const stdout = broker.stdout;
+  if (!stdout) throw new Error("Broker stdout is not piped");
+
   const ready = new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
       cleanup();
@@ -48,11 +51,11 @@ async function waitForBrokerReady(broker: ChildProcessWithoutNullStreams): Promi
     };
     const cleanup = () => {
       clearTimeout(timeout);
-      broker.stdout.off("data", onStdout);
+      stdout.off("data", onStdout);
       broker.off("exit", onExit);
     };
 
-    broker.stdout.on("data", onStdout);
+    stdout.on("data", onStdout);
     broker.once("exit", onExit);
   });
 

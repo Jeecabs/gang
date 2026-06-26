@@ -750,7 +750,8 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     if (reconnectPromise && reconnectPromiseGeneration === generationAtStart) {
       return reconnectPromise;
     }
-    const nextReconnectPromise = (async () => {
+    let nextReconnectPromise: Promise<IntercomClient> | null = null;
+    nextReconnectPromise = (async () => {
       const nextClient = new IntercomClient();
       client = nextClient;
       attachClientHandlers(nextClient);
@@ -1067,7 +1068,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
           })),
         }, { description: "Structured interview request for reason='interview_request'" })),
       }),
-      async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      async execute(_toolCallId, params, signal, _onUpdate, ctx): Promise<any> {
         const reason = params.reason as ContactSupervisorReason;
         if (reason !== "need_decision" && reason !== "progress_update" && reason !== "interview_request") {
           return {
@@ -1347,7 +1348,7 @@ Usage:
       })),
     }),
 
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<any> {
       let connectedClient: IntercomClient;
       try {
         connectedClient = await ensureConnected("tool");

@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from "fs";
+import { appendFileSync, chmodSync, mkdirSync } from "fs";
 import { dirname, join } from "path";
 import { homedir } from "os";
 
@@ -20,8 +20,11 @@ export function getIntercomLogPath(homeDir: string = homedir()): string {
 /** Append one greppable, replayable JSONL line. Best-effort: never break routing. */
 export function appendIntercomLog(entry: RoutedLogEntry, logPath: string = getIntercomLogPath()): void {
   try {
-    mkdirSync(dirname(logPath), { recursive: true });
-    appendFileSync(logPath, JSON.stringify(entry) + "\n");
+    const dir = dirname(logPath);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    if (process.platform !== "win32") chmodSync(dir, 0o700);
+    appendFileSync(logPath, JSON.stringify(entry) + "\n", { mode: 0o600 });
+    if (process.platform !== "win32") chmodSync(logPath, 0o600);
   } catch {
     // ponytail: observability is best-effort; a failed log write must not drop a message.
   }

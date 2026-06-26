@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendIntercomLog } from "./tap.ts";
@@ -32,6 +32,10 @@ test("appendIntercomLog creates the log directory if missing", () => {
   try {
     appendIntercomLog({ ts: 1, id: "a", from: "a", to: "b", text: "x" }, logPath);
     assert.match(readFileSync(logPath, "utf8"), /"text":"x"/);
+    if (process.platform !== "win32") {
+      assert.equal(statSync(join(dir, "nested", "deep")).mode & 0o777, 0o700);
+      assert.equal(statSync(logPath).mode & 0o777, 0o600);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
