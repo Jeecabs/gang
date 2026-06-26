@@ -286,6 +286,29 @@ function waitForReply(client: InstanceType<typeof IntercomClient>, replyTo: stri
   });
 }
 
+function collectMessages(client: InstanceType<typeof IntercomClient>) {
+  const messages: Array<{ from: SessionInfo; message: Message; }> = [];
+  const handler = (from: SessionInfo, message: Message) => {
+    messages.push({ from, message });
+  };
+  client.on("message", handler);
+  return {
+    messages,
+    async waitForCount(count: number, timeoutMs = 5000): Promise<void> {
+      const deadline = Date.now() + timeoutMs;
+      while (messages.length < count) {
+        if (Date.now() > deadline) {
+          throw new Error(`Timed out waiting for ${count} messages; saw ${messages.length}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    },
+    stop() {
+      client.off("message", handler);
+    },
+  };
+}
+
 async function waitForSessionByName(client: InstanceType<typeof IntercomClient>, name: string): Promise<SessionInfo> {
   const deadline = Date.now() + 2000;
   while (Date.now() < deadline) {
@@ -907,6 +930,40 @@ test("child supervisor tool clears reply waiter when cancelled", { concurrency: 
       await harness.emitLifecycle("session_shutdown");
     });
   } finally {
+    await cleanup();
+  }
+});
+
+test("parallel intercom asks fail one request without cancelling the active waiter", { concurrency: false }, async () => {
+  const { default: piIntercomExtension } = await import("./index.ts");
+  const { orchestrator, cleanup } = await setupClients();
+  const harness = createExtensionHarness("parallel-ask-worker");
+  const collector = collectMessages(orchestrator);
+
+  try {
+    piIntercomExtension(harness.pi as never);
+    await harness.emitLifecycle("session_start");
+    const intercomTool = getRegisteredTool(harness, "intercom");
+
+    const firstAsk = intercomTool.execute("ask-1", { action: "ask", to: "orchestrator", message: "First question?" }, new AbortController().signal, undefined, harness.ctx);
+    const secondAsk = intercomTool.execute("ask-2", { action: "ask", to: "orchestrator", message: "Second question?" }, new AbortController().signal, undefined, harness.ctx);
+
+    await collector.waitForCount(1);
+
+    const [{ from, message }] = collector.messages;
+    const reply = await orchestrator.send(from.id, { text: "Use the stable API.", replyTo: message.id });
+    assert.equal(reply.delivered, true);
+
+    const results = await Promise.all([firstAsk, secondAsk]);
+    // Checked after both asks settle: a regressed loser sends its spurious ask before it returns,
+    // and the reply round-trip above gives it ample time to land — no fixed sleep needed.
+    assert.equal(collector.messages.length, 1, "only the waiter owner sends an ask");
+    const resultTexts = results.map((result) => result.content[0]?.text ?? "");
+    assert.equal(resultTexts.filter((text) => /Use the stable API\./.test(text)).length, 1);
+    assert.equal(resultTexts.filter((text) => /Already waiting for a reply/.test(text)).length, 1);
+  } finally {
+    collector.stop();
+    await harness.emitLifecycle("session_shutdown");
     await cleanup();
   }
 });
