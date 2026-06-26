@@ -56,14 +56,17 @@ export class ReplyTracker {
     }
 
     const pending = Array.from(this.pendingAsks.values());
-    if (pending.length === 1) {
-      return pending[0]!;
+    const [onlyPending] = pending;
+    if (pending.length === 1 && onlyPending) {
+      return onlyPending;
     }
 
     if (options.to) {
-      const matches = pending.filter((context) => matchesPendingSender(context, options.to!));
-      if (matches.length === 1) {
-        return matches[0]!;
+      const target = options.to;
+      const matches = pending.filter((context) => matchesPendingSender(context, target));
+      const [onlyMatch] = matches;
+      if (matches.length === 1 && onlyMatch) {
+        return onlyMatch;
       }
       if (matches.length > 1) {
         throw new Error(`Multiple pending asks from \"${options.to}\" — use the sender session ID instead.`);

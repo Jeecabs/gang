@@ -139,7 +139,7 @@
     <aside>
       <div class="sec-head"><h2>The Squad</h2><span class="hist" id="hist"></span><span class="n" id="mn">0</span></div>
       <div id="members"></div>
-      <div class="rail-foot"><span class="lbl">:7717 · intercom bus</span></div>
+      <div class="rail-foot"><span class="lbl" id="bus-label"></span></div>
     </aside>
     <main>
       <div class="sec-head"><h2>The Wire</h2><span class="n" id="fn">0</span></div>
@@ -156,7 +156,10 @@ const membersEl = document.getElementById("members");
 const feedEl = document.getElementById("feed");
 const conn = document.getElementById("conn");
 const connLabel = document.getElementById("conn-label");
+const busLabel = document.getElementById("bus-label");
 let msgCount = 0;
+
+busLabel.textContent = `:${window.location.port || "7717"} · intercom bus`;
 
 function setCount(id, n){ document.getElementById(id).textContent = n; }
 function short(s){ return (s||"").slice(0,8); }

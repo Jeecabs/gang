@@ -1,12 +1,17 @@
 # gang
 
+<p align="center">
+  <img src="assets/gang-logo.png" alt="gang mission-control crew logo" width="260">
+</p>
+
 A minimal, **observable** subagent primitive for [Pi](https://github.com/earendil-works). Fire up
 subagents as **visible tmux panes** you watch live, let them talk over a **cross-agent message
 bus**, and observe everything three ways: live panes, a durable log, and a mission-control view —
 in your terminal (a Pi overlay) **and** in the browser.
 
 Built on a vendored, fully-owned copy of [pi-intercom](https://github.com/nicobailon/pi-intercom)
-(MIT). No external runtime dependency. Targets `@earendil-works` Pi **0.80.2**.
+(MIT). No external `pi-intercom` runtime dependency; npm deps install with the package.
+Targets `@earendil-works` Pi **0.80.2**.
 
 ```
 ┌─ tmux panes ──────────────┐   raw per-agent view — watch each member's pi session
@@ -32,11 +37,12 @@ Built on a vendored, fully-owned copy of [pi-intercom](https://github.com/nicoba
 
 ### Option A — from GitHub (recommended)
 
-Pi installs the package's runtime dependencies for you on a git install:
+Pi packages run local extension code with your user permissions, so review the source before
+installing. Pi installs the package's runtime dependencies for you on a git install:
 
 ```sh
 pi install ssh://git@github.com/Jeecabs/gang     # private repo → uses your SSH key
-pi list                                           # verify: should list  gang  and  intercom
+pi list                                           # verify: should list  gang
 ```
 
 ### Option B — local clone (to hack on it)
@@ -93,7 +99,7 @@ tail -f ~/.pi/agent/intercom/intercom.jsonl
 | `gang` tool | `{action:"spawn", task, role?, thinking?}` · `{action:"list"}` · `{action:"name", name}` — model-callable |
 | `/gang` | show the roster |
 | `/gang spawn [@name] [-t <level>] <task>` | spawn a member by hand; name optional (auto `m1`, `m2`, …). Levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
-| `/gang clean` · `/gang clean all` | `clean` reaps finished panes (`remain-on-exit` keeps them) and prunes them from the roster; `clean all` kills the whole `gang` session — stops every member |
+| `/gang clean` · `/gang clean all` | `clean` reaps finished panes (`remain-on-exit` keeps them) and prunes them from the roster; `clean all` stops this boss's members (detached mode kills the `gang` session; in-tmux mode kills direct member panes only) |
 | `/gang url` | show the browser mission-control URL (`http://127.0.0.1:<GANG_GUI_PORT>`) |
 | `/gang name [name]` | show or set this agent/session's own name |
 | `/gang watch` · `alt+g` | open mission control (in-Pi overlay) |
@@ -101,7 +107,7 @@ tail -f ~/.pi/agent/intercom/intercom.jsonl
 
 Env knobs: `GANG_GUI_PORT` (default `7717`), `GANG_TMUX_BIN` (default Homebrew tmux), `GANG_FEED_HOURS` (mission-control feed recency window, default `6`).
 
-Finished members linger on purpose — their panes stay (`remain-on-exit on`) so you can read the final state. Reap them when you're done with `/gang clean` (or `gang({ action: "clean" })`); `/gang clean all` tears the whole session down.
+Finished members linger on purpose — their panes stay (`remain-on-exit on`) so you can read the final state. Reap them when you're done with `/gang clean` (or `gang({ action: "clean" })`). `/gang clean all` tears down the detached `gang` session outside tmux; inside tmux it kills this boss's direct member panes only.
 
 Agent naming: an unnamed orchestrator session claims `boss of <current-folder>` (e.g. `boss of private-evals`) **on its first spawn**, not at startup — so plain Pi sessions stay unnamed in the `pi -r` resume list. Use `/gang name <name>` before spawning to pick a custom target; spawned members get that exact supervisor name. Member task prompts also tell agents to name themselves with `gang({ action: "name", name: "<clear role/name>" })` before spinning up their own teammate.
 
@@ -123,16 +129,17 @@ the member on the bus and unlock its `contact_supervisor` tool — that's the wh
 | Env var | Set to | Effect |
 |---|---|---|
 | `PI_SUBAGENT_INTERCOM_SESSION_NAME` | `<role>` | member's intercom identity |
-| `PI_SUBAGENT_ORCHESTRATOR_TARGET` | `boss` | who it reports to |
+| `PI_SUBAGENT_ORCHESTRATOR_TARGET` | current supervisor name (`boss of <folder>` or custom `/gang name`) | who it reports to |
 | `PI_SUBAGENT_RUN_ID` / `_CHILD_AGENT` / `_CHILD_INDEX` | run metadata | unlocks `contact_supervisor` |
 
-(The member's addressable **name** comes from Pi's `--name` flag; boss self-names via
-`pi.setSessionName("boss")`.)
+(The member's addressable **name** comes from Pi's `--name` flag; the supervisor self-names
+lazily to the computed or custom `orchestratorName`.)
 
 ## Develop
 
 ```sh
-npm test     # vendored intercom suite + gang/tmux/tap/GUI/overlay tests
+npm test             # vendored intercom suite + gang/tmux/tap/GUI/overlay tests
+npm run typecheck    # strict TypeScript check
 ```
 
 ## Credits

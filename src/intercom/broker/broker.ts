@@ -18,6 +18,13 @@ interface ConnectedSession {
   info: SessionInfo;
 }
 
+function requireRegisteredSessionId(currentId: string | null, messageType: string): string {
+  if (currentId === null) {
+    throw new Error(`Received ${messageType} before register`);
+  }
+  return currentId;
+}
+
 function isAttachment(value: unknown): value is Attachment {
   if (typeof value !== "object" || value === null) {
     return false;
@@ -216,8 +223,9 @@ class IntercomBroker {
       }
 
       case "unregister": {
-        this.sessions.delete(currentId!);
-        this.broadcast({ type: "session_left", sessionId: currentId! }, currentId!);
+        const sessionId = requireRegisteredSessionId(currentId, clientMessage.type);
+        this.sessions.delete(sessionId);
+        this.broadcast({ type: "session_left", sessionId }, sessionId);
         setId(null);
         this.scheduleShutdownCheck();
         break;
@@ -248,7 +256,8 @@ class IntercomBroker {
 
         const targets = this.findSessions(clientMessage.to);
         if (targets.length === 1) {
-          const fromSession = this.sessions.get(currentId!);
+          const sessionId = requireRegisteredSessionId(currentId, clientMessage.type);
+          const fromSession = this.sessions.get(sessionId);
           if (!fromSession) {
             writeMessage(socket, {
               type: "delivery_failed",
@@ -299,7 +308,8 @@ class IntercomBroker {
       }
 
       case "presence": {
-        const session = this.sessions.get(currentId!);
+        const sessionId = requireRegisteredSessionId(currentId, clientMessage.type);
+        const session = this.sessions.get(sessionId);
         if (session) {
           if (clientMessage.name !== undefined) {
             if (typeof clientMessage.name !== "string") {
@@ -320,7 +330,7 @@ class IntercomBroker {
             session.info.model = clientMessage.model;
           }
           session.info.lastActivity = Date.now();
-          this.broadcast({ type: "presence_update", session: session.info }, currentId!);
+          this.broadcast({ type: "presence_update", session: session.info }, sessionId);
         }
         break;
       }

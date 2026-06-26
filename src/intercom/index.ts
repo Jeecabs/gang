@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "crypto";
 import { Type } from "typebox";
 import { Text } from "@earendil-works/pi-tui";
@@ -22,6 +22,23 @@ const SUBAGENT_RUN_ID_ENV = "PI_SUBAGENT_RUN_ID";
 const SUBAGENT_CHILD_AGENT_ENV = "PI_SUBAGENT_CHILD_AGENT";
 const SUBAGENT_CHILD_INDEX_ENV = "PI_SUBAGENT_CHILD_INDEX";
 const SUBAGENT_INTERCOM_SESSION_NAME_ENV = "PI_SUBAGENT_INTERCOM_SESSION_NAME";
+
+interface IntercomToolDetails {
+  delivered?: boolean;
+  done?: true;
+  error?: true;
+  messageId?: string;
+  reason?: string;
+  replyTo?: string;
+}
+
+interface ContactSupervisorToolDetails extends IntercomToolDetails {
+  structuredReply?: unknown;
+  structuredReplyParseError?: string;
+}
+
+type ContactSupervisorResult = AgentToolResult<ContactSupervisorToolDetails | undefined>;
+type IntercomResult = AgentToolResult<IntercomToolDetails | undefined>;
 
 interface ChildOrchestratorMetadata {
   orchestratorTarget: string;
@@ -409,6 +426,14 @@ function previewText(value: unknown, maxLength = 72): string | undefined {
 function firstTextContent(result: { content?: Array<{ type: string; text?: string }> }): string {
   return result.content?.find((item) => item.type === "text" && typeof item.text === "string")?.text?.replace(/\*\*/g, "") ?? "";
 }
+
+function scheduleShutdownIfAvailable(pi: ExtensionAPI): void {
+  if ("shutdown" in pi && typeof pi.shutdown === "function") {
+    const shutdown = pi.shutdown;
+    setTimeout(() => shutdown(), 0);
+  }
+}
+
 export default function piIntercomExtension(pi: ExtensionAPI) {
   let client: IntercomClient | null = null;
   const config: IntercomConfig = loadConfig();
@@ -525,7 +550,8 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
   }
   function getReconnectDelayMs(): number {
     const backoffMs = [1000, 2000, 5000, 10000, 30000];
-    return backoffMs[Math.min(reconnectAttempt, backoffMs.length - 1)]!;
+    const fallback = backoffMs[backoffMs.length - 1] ?? 30000;
+    return backoffMs[Math.min(reconnectAttempt, backoffMs.length - 1)] ?? fallback;
   }
   function currentStatus(): string {
     const activeToolName = activeTools.values().next().value;
@@ -1068,19 +1094,17 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
           })),
         }, { description: "Structured interview request for reason='interview_request'" })),
       }),
-      async execute(_toolCallId, params, signal, _onUpdate, ctx): Promise<any> {
+      async execute(_toolCallId, params, signal, _onUpdate, ctx): Promise<ContactSupervisorResult> {
         const reason = params.reason as ContactSupervisorReason;
         if (reason !== "need_decision" && reason !== "progress_update" && reason !== "interview_request") {
           return {
             content: [{ type: "text", text: "Invalid reason. Use 'need_decision', 'interview_request', or 'progress_update'." }],
-            isError: true,
             details: { error: true },
           };
         }
         if ((reason === "need_decision" || reason === "progress_update") && typeof params.message !== "string") {
           return {
             content: [{ type: "text", text: `Missing 'message' parameter for reason '${reason}'.` }],
-            isError: true,
             details: { error: true },
           };
         }
@@ -1090,7 +1114,6 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
         if (interviewValidation?.ok === false) {
           return {
             content: [{ type: "text", text: `Invalid interview request: ${interviewValidation.error}` }],
-            isError: true,
             details: { error: true },
           };
         }
@@ -1102,7 +1125,6 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
         } catch (error) {
           return {
             content: [{ type: "text", text: `Intercom not connected: ${getErrorMessage(error)}` }],
-            isError: true,
             details: { error: true },
           };
         }
@@ -1112,7 +1134,6 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
         if (signal?.aborted) {
           return {
             content: [{ type: "text", text: "Cancelled" }],
-            isError: true,
             details: { error: true },
           };
         }
@@ -1124,21 +1145,18 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
         } catch (error) {
           return {
             content: [{ type: "text", text: `Failed to resolve supervisor target: ${getErrorMessage(error)}` }],
-            isError: true,
             details: { error: true },
           };
         }
         if (signal?.aborted) {
           return {
             content: [{ type: "text", text: "Cancelled" }],
-            isError: true,
             details: { error: true },
           };
         }
         if (sendTo === connectedClient.sessionId) {
           return {
             content: [{ type: "text", text: "Cannot message the current session" }],
-            isError: true,
             details: { error: true },
           };
         }
@@ -1153,7 +1171,6 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
               const errorText = result.reason ?? "Session may not exist or has disconnected.";
               return {
                 content: [{ type: "text", text: `Message to "${metadata.orchestratorTarget}" was not delivered: ${errorText}` }],
-                isError: true,
                 details: { messageId: result.id, delivered: false, reason: result.reason },
               };
             }
@@ -1166,13 +1183,11 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
             });
             return {
               content: [{ type: "text", text: `Progress update sent to supervisor ${metadata.orchestratorTarget}` }],
-              isError: false,
               details: { messageId: result.id, delivered: true },
             };
           } catch (error) {
             return {
               content: [{ type: "text", text: `Failed to send progress update: ${getErrorMessage(error)}` }],
-              isError: true,
               details: { error: true },
             };
           }
@@ -1181,7 +1196,6 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
         if (replyWaiter) {
           return {
             content: [{ type: "text", text: "Already waiting for a reply" }],
-            isError: true,
             details: { error: true },
           };
         }
@@ -1200,13 +1214,18 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
             }
             return {
               content: [{ type: "text", text: "Cancelled" }],
-              isError: true,
               details: { error: true },
             };
           }
-          const requestText = reason === "interview_request"
-            ? formatChildOrchestratorMessage("interview", metadata, formatSupervisorInterviewRequest(supervisorInterview!, typeof params.message === "string" ? params.message : undefined))
-            : formatChildOrchestratorMessage("ask", metadata, params.message as string);
+          let requestText: string;
+          if (reason === "interview_request") {
+            if (!supervisorInterview) {
+              throw new Error("Validated interview request is missing");
+            }
+            requestText = formatChildOrchestratorMessage("interview", metadata, formatSupervisorInterviewRequest(supervisorInterview, typeof params.message === "string" ? params.message : undefined));
+          } else {
+            requestText = formatChildOrchestratorMessage("ask", metadata, params.message as string);
+          }
           const sendResult = await connectedClient.send(sendTo, {
             messageId: questionId,
             text: requestText,
@@ -1224,8 +1243,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
             }
             return {
               content: [{ type: "text", text: `Message to "${metadata.orchestratorTarget}" was not delivered: ${errorText}` }],
-              isError: true,
-              details: { error: true },
+              details: { messageId: sendResult.id, delivered: false, reason: sendResult.reason },
             };
           }
           pi.appendEntry("intercom_sent", {
@@ -1244,7 +1262,9 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
           const replyAttachments = replyMessage.content.attachments?.length
             ? formatAttachments(replyMessage.content.attachments)
             : "";
-          const structuredReply = reason === "interview_request" ? parseStructuredSupervisorReply(replyText, supervisorInterview!) : undefined;
+          const structuredReply = reason === "interview_request" && supervisorInterview
+            ? parseStructuredSupervisorReply(replyText, supervisorInterview)
+            : undefined;
           pi.appendEntry("intercom_received", {
             from: metadata.orchestratorTarget,
             message: { text: replyText, attachments: replyMessage.content.attachments },
@@ -1254,10 +1274,11 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
           });
           return {
             content: [{ type: "text", text: `**Reply from supervisor:**\n${replyText}${replyAttachments}` }],
-            isError: false,
-            ...(structuredReply
-              ? { details: structuredReply.value !== undefined ? { structuredReply: structuredReply.value } : { structuredReplyParseError: structuredReply.error } }
-              : {}),
+            details: structuredReply
+              ? structuredReply.value !== undefined
+                ? { structuredReply: structuredReply.value }
+                : { structuredReplyParseError: structuredReply.error }
+              : undefined,
           };
         } catch (error) {
           rejectReplyWaiter(toError(error));
@@ -1270,7 +1291,6 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
           }
           return {
             content: [{ type: "text", text: `Failed: ${getErrorMessage(error)}` }],
-            isError: true,
             details: { error: true },
           };
         }
@@ -1293,7 +1313,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
         if (isPartial) {
           return new Text(theme.fg("warning", "Waiting for supervisor..."), 0, 0);
         }
-        const details = result.details as { delivered?: boolean; error?: boolean; messageId?: string; reason?: string; structuredReplyParseError?: string } | undefined;
+        const details = result.details;
         const textContent = firstTextContent(result);
         const failed = Boolean(context.isError || details?.error === true || details?.delivered === false);
         const parseWarning = typeof details?.structuredReplyParseError === "string";
@@ -1320,6 +1340,7 @@ Use this to communicate findings, request help, or coordinate work with other se
 Usage:
   intercom({ action: "list" })                    → List active sessions
   intercom({ action: "send", to: "session-name", message: "..." })  → Send message
+  intercom({ action: "send", to: "boss", message: "...", done: true }) → Subagent: report final result, then end this session
   intercom({ action: "ask", to: "session-name", message: "..." })   → Ask and wait for reply
   intercom({ action: "reply", message: "..." })                      → Reply to the active/single pending ask
   intercom({ action: "pending" })                                      → List unresolved inbound asks
@@ -1346,23 +1367,25 @@ Usage:
       replyTo: Type.Optional(Type.String({
         description: "Message ID to reply to (for threading or responding to an 'ask')",
       })),
+      done: Type.Optional(Type.Boolean({
+        description: "Subagent only: after this 'send' is delivered, end this session so the finished pane can be reaped. Use when reporting your final result to your supervisor.",
+      })),
     }),
 
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<any> {
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<IntercomResult> {
       let connectedClient: IntercomClient;
       try {
         connectedClient = await ensureConnected("tool");
       } catch (error) {
         return {
           content: [{ type: "text", text: `Intercom not connected: ${getErrorMessage(error)}` }],
-          isError: true,
           details: { error: true },
         };
       }
 
       syncPresenceIdentity(ctx.sessionManager.getSessionId());
 
-      const { action, to, message, attachments, replyTo } = params;
+      const { action, to, message, attachments, replyTo, done } = params;
 
       switch (action) {
         case "list": {
@@ -1375,7 +1398,6 @@ Usage:
             if (!currentSession) {
               return {
                 content: [{ type: "text", text: "Current session is missing from intercom session list." }],
-                isError: true,
                 details: { error: true },
               };
             }
@@ -1387,12 +1409,11 @@ Usage:
 
             return {
               content: [{ type: "text", text: `${currentSection}\n\n${otherSection}` }],
-              isError: false,
+              details: undefined,
             };
           } catch (error) {
             return {
               content: [{ type: "text", text: `Failed to list sessions: ${getErrorMessage(error)}` }],
-              isError: true,
               details: { error: true },
             };
           }
@@ -1402,7 +1423,6 @@ Usage:
           if (!to || !message) {
             return {
               content: [{ type: "text", text: "Missing 'to' or 'message' parameter" }],
-              isError: true,
               details: { error: true },
             };
           }
@@ -1411,7 +1431,6 @@ Usage:
             if (sendTo === connectedClient.sessionId) {
               return {
                 content: [{ type: "text", text: "Cannot message the current session" }],
-                isError: true,
                 details: { error: true },
               };
             }
@@ -1424,7 +1443,7 @@ Usage:
               if (!confirmed) {
                 return {
                   content: [{ type: "text", text: "Message cancelled by user" }],
-                  isError: false,
+                  details: undefined,
                 };
               }
             }
@@ -1437,7 +1456,6 @@ Usage:
               const errorText = result.reason ?? "Session may not exist or has disconnected.";
               return {
                 content: [{ type: "text", text: `Message to "${to}" was not delivered: ${errorText}` }],
-                isError: true,
                 details: { messageId: result.id, delivered: false, reason: result.reason },
               };
             }
@@ -1450,15 +1468,24 @@ Usage:
             if (replyTo) {
               replyTracker.markReplied(replyTo);
             }
+            if (done && childOrchestratorMetadata) {
+              // Final result delivered — end the member's session so its now-finished pane becomes
+              // reapable (`/gang clean`). Gated on childOrchestratorMetadata so only spawned members
+              // self-exit; a top-level session that passes `done` never kills itself. Deferred so this
+              // tool result flushes before pi tears down.
+              scheduleShutdownIfAvailable(pi);
+              return {
+                content: [{ type: "text", text: `Message sent to ${to}; reported done, ending session.` }],
+                details: { messageId: result.id, delivered: true, done: true },
+              };
+            }
             return {
               content: [{ type: "text", text: `Message sent to ${to}` }],
-              isError: false,
               details: { messageId: result.id, delivered: true },
             };
           } catch (error) {
             return {
               content: [{ type: "text", text: `Failed to send: ${getErrorMessage(error)}` }],
-              isError: true,
               details: { error: true },
             };
           }
@@ -1468,7 +1495,6 @@ Usage:
           if (!to || !message) {
             return {
               content: [{ type: "text", text: "Missing 'to' or 'message' parameter" }],
-              isError: true,
               details: { error: true },
             };
           }
@@ -1476,7 +1502,6 @@ Usage:
           if (replyWaiter) {
             return {
               content: [{ type: "text", text: "Already waiting for a reply" }],
-              isError: true,
               details: { error: true },
             };
           }
@@ -1484,7 +1509,6 @@ Usage:
           if (_signal?.aborted) {
             return {
               content: [{ type: "text", text: "Cancelled" }],
-              isError: true,
               details: { error: true },
             };
           }
@@ -1495,14 +1519,12 @@ Usage:
             if (_signal?.aborted) {
               return {
                 content: [{ type: "text", text: "Cancelled" }],
-                isError: true,
                 details: { error: true },
               };
             }
             if (sendTo === connectedClient.sessionId) {
               return {
                 content: [{ type: "text", text: "Cannot message the current session" }],
-                isError: true,
                 details: { error: true },
               };
             }
@@ -1528,7 +1550,6 @@ Usage:
               }
               return {
                 content: [{ type: "text", text: `Message to "${to}" was not delivered: ${errorText}` }],
-                isError: true,
                 details: { error: true },
               };
             }
@@ -1551,7 +1572,7 @@ Usage:
             });
             return {
               content: [{ type: "text", text: `**Reply from ${to}:**\n${replyText}${replyAttachments}` }],
-              isError: false,
+              details: undefined,
             };
           } catch (error) {
             rejectReplyWaiter(toError(error));
@@ -1564,7 +1585,6 @@ Usage:
             }
             return {
               content: [{ type: "text", text: `Failed: ${getErrorMessage(error)}` }],
-              isError: true,
               details: { error: true },
             };
           }
@@ -1574,7 +1594,6 @@ Usage:
           if (!message) {
             return {
               content: [{ type: "text", text: "Missing 'message' parameter" }],
-              isError: true,
               details: { error: true },
             };
           }
@@ -1584,7 +1603,6 @@ Usage:
             if (target.from.id === connectedClient.sessionId) {
               return {
                 content: [{ type: "text", text: "Cannot message the current session" }],
-                isError: true,
                 details: { error: true },
               };
             }
@@ -1596,7 +1614,6 @@ Usage:
               const errorText = result.reason ?? "Session may not exist or has disconnected.";
               return {
                 content: [{ type: "text", text: `Reply to "${target.from.name || target.from.id}" was not delivered: ${errorText}` }],
-                isError: true,
                 details: { messageId: result.id, delivered: false, reason: result.reason },
               };
             }
@@ -1609,13 +1626,11 @@ Usage:
             });
             return {
               content: [{ type: "text", text: `Reply sent to ${target.from.name || target.from.id}` }],
-              isError: false,
               details: { messageId: result.id, delivered: true, replyTo: target.message.id },
             };
           } catch (error) {
             return {
               content: [{ type: "text", text: `Failed to reply: ${getErrorMessage(error)}` }],
-              isError: true,
               details: { error: true },
             };
           }
@@ -1626,7 +1641,7 @@ Usage:
           if (pendingAsks.length === 0) {
             return {
               content: [{ type: "text", text: "No unresolved inbound asks." }],
-              isError: false,
+              details: undefined,
             };
           }
 
@@ -1638,7 +1653,7 @@ Usage:
           });
           return {
             content: [{ type: "text", text: `**Pending asks:**\n${lines.join("\n")}` }],
-            isError: false,
+            details: undefined,
           };
         }
 
@@ -1651,12 +1666,11 @@ Usage:
                 type: "text",
                 text: `**Intercom Status:**\nConnected: Yes\nSession ID: ${mySessionId}\nActive sessions: ${sessions.length}`,
               }],
-              isError: false,
+              details: undefined,
             };
           } catch (error) {
             return {
               content: [{ type: "text", text: `Failed to get status: ${getErrorMessage(error)}` }],
-              isError: true,
               details: { error: true },
             };
           }
@@ -1665,7 +1679,6 @@ Usage:
         default:
           return {
             content: [{ type: "text", text: `Unknown action: ${action}` }],
-            isError: true,
             details: { error: true },
           };
       }
@@ -1692,7 +1705,7 @@ Usage:
       if (isPartial) {
         return new Text(theme.fg("warning", "Intercom working..."), 0, 0);
       }
-      const details = result.details as { delivered?: boolean; error?: boolean; messageId?: string; reason?: string } | undefined;
+      const details = result.details;
       const failed = Boolean(context.isError || details?.error === true || details?.delivered === false);
       let text = failed ? theme.fg("error", "✗ ") : theme.fg("success", "✓ ");
       text += theme.fg(failed ? "error" : "text", firstTextContent(result));

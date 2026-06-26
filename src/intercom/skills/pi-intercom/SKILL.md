@@ -13,8 +13,8 @@ Use this skill when you need to coordinate work across multiple pi sessions
 running on the same machine. Pi-intercom enables direct 1:1 messaging between
 sessions for delegation, context sharing, and collaborative workflows.
 
-When you are supervising `pi-subagents`, delegated child agents can escalate to
-you via `contact_supervisor` if `pi-subagents` supplied child bridge metadata.
+When you are supervising gang or `pi-subagents` children, delegated child agents can escalate to
+you via `contact_supervisor` if child bridge metadata (`PI_SUBAGENT_*`) was supplied.
 This skill covers how to handle those orchestrator-side escalations.
 
 ## When to Use
@@ -128,7 +128,7 @@ intercom({
 
 ### Pattern 6: Handle Subagent Escalations (Orchestrator Side)
 
-When `pi-subagents` spawns a delegated child and supplies child bridge metadata,
+When gang or `pi-subagents` spawns a delegated child and supplies child bridge metadata,
 that child can reach you through `contact_supervisor`. You receive a formatted
 message that includes run metadata:
 
@@ -187,7 +187,7 @@ intercom({ action: "pending" })
 intercom({ action: "reply", to: "subagent-worker-78f659a3-1", message: "Use the v2 API." })
 ```
 
-**Important:** Only sessions where `pi-subagents` supplied child bridge metadata
+**Important:** Only sessions where gang/`pi-subagents` supplied child bridge metadata
 get the `contact_supervisor` tool. Normal sessions use the regular `intercom`
 tool. If you see the formatted supervisor decision/progress update message, treat
 it as a `contact_supervisor` escalation.
@@ -306,9 +306,10 @@ If neither `cmux` nor `tmux` is available, skip this path and use normal `interc
 - **Cannot self-target**: A session cannot ask itself
 
 ```typescript
-// Check if already waiting before asking
+// Check the returned text/details before asking again
 const result = await intercom({ action: "ask", to: "planner", message: "..." });
-if (result.isError && result.content[0].text.includes("Already waiting")) {
+const [resultContent] = result.content;
+if (resultContent?.text.includes("Already waiting") || result.details?.error) {
   // Use send instead, or wait for current ask to complete
 }
 ```

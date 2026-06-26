@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { execFile } from "child_process";
@@ -44,6 +44,8 @@ const COMMAND_COMPLETIONS: AutocompleteItem[] = [
 ];
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+type GangToolDetails = Member | { name: string } | { error: true } | undefined;
+type ToolResult = AgentToolResult<GangToolDetails>;
 
 // Emitted when the boss claims its session name on first spawn. The intercom extension listens and
 // re-registers the new presence name on the bus immediately (no turn boundary to wait for), so a
@@ -164,8 +166,9 @@ function taskFileContent(role: string, task: string, orchestrator: string): stri
     `You are "${role}", a member of a gang supervised by "${orchestrator}". Work autonomously.`,
     "If you spawn a teammate or your role needs more specificity, name yourself first with the gang tool:",
     "  gang({ action: \"name\", name: \"<clear role/name>\" })",
-    "When you are finished, send your result to your supervisor with the intercom tool:",
-    `  intercom({ action: "send", to: "${orchestrator}", message: "<your result>" })`,
+    "When you are finished, report your result to your supervisor and end your session in one call:",
+    `  intercom({ action: "send", to: "${orchestrator}", message: "<your result>", done: true })`,
+    "That delivers your result, then exits this session so your finished pane can be cleaned up.",
     "If you get blocked and need a decision, use the contact_supervisor tool instead.",
     "",
   ].join("\n");
@@ -394,39 +397,39 @@ Only "task" is required for spawn. spawn returns immediately. The member runs it
       thinking: Type.Optional(Type.String({ description: "Optional Pi thinking level for spawn: off, minimal, low, medium, high, or xhigh" })),
       name: Type.Optional(Type.String({ description: "New name for this agent/session when action='name'" })),
     }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<any> {
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<ToolResult> {
       const action = params.action;
       if (action === "spawn") {
         if (typeof params.task !== "string" || !params.task) {
-          return { content: [{ type: "text", text: "spawn requires 'task'." }], isError: true, details: { error: true } };
+          return { content: [{ type: "text", text: "spawn requires 'task'." }], details: { error: true } };
         }
         const name = typeof params.role === "string" && params.role.trim() ? params.role.trim() : undefined;
         const thinkingLevel = typeof params.thinking === "string" ? params.thinking : undefined;
         try {
           orchestratorName = pi.getSessionName()?.trim() || orchestratorName;
           const member = await spawnMember(params.task, ctx.cwd ?? process.cwd(), { name, thinkingLevel });
-          return { content: [{ type: "text", text: spawnedMessage(member) }], isError: false, details: member };
+          return { content: [{ type: "text", text: spawnedMessage(member) }], details: member };
         } catch (error) {
-          return { content: [{ type: "text", text: `gang spawn failed: ${getErrorMessage(error)}` }], isError: true, details: { error: true } };
+          return { content: [{ type: "text", text: `gang spawn failed: ${getErrorMessage(error)}` }], details: { error: true } };
         }
       }
       if (action === "list") {
-        return { content: [{ type: "text", text: formatRoster() }], isError: false };
+        return { content: [{ type: "text", text: formatRoster() }], details: undefined };
       }
       if (action === "clean") {
-        return { content: [{ type: "text", text: await cleanGang() }], isError: false };
+        return { content: [{ type: "text", text: await cleanGang() }], details: undefined };
       }
       if (action === "name") {
         const nextName = typeof params.name === "string" ? params.name.trim() : "";
         if (!nextName) {
           const currentName = pi.getSessionName()?.trim() || orchestratorName;
-          return { content: [{ type: "text", text: `Agent name: ${currentName}` }], isError: false };
+          return { content: [{ type: "text", text: `Agent name: ${currentName}` }], details: undefined };
         }
         pi.setSessionName(nextName);
         orchestratorName = nextName;
-        return { content: [{ type: "text", text: `Agent name set: ${nextName}` }], isError: false, details: { name: nextName } };
+        return { content: [{ type: "text", text: `Agent name set: ${nextName}` }], details: { name: nextName } };
       }
-      return { content: [{ type: "text", text: `Unknown action "${action}". Use 'spawn', 'list', 'clean', or 'name'.` }], isError: true, details: { error: true } };
+      return { content: [{ type: "text", text: `Unknown action "${action}". Use 'spawn', 'list', 'clean', or 'name'.` }], details: { error: true } };
     },
   });
 
