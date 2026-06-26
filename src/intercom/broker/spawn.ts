@@ -1,5 +1,5 @@
 import { spawn } from "child_process";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
@@ -76,8 +76,8 @@ function writeWindowsHiddenLauncher(
   commandLine: string,
   launcherPath: string = getWindowsHiddenLauncherPath(),
 ): string {
-  mkdirSync(dirname(launcherPath), { recursive: true });
-  writeFileSync(launcherPath, getWindowsHiddenLauncherScript(commandLine), "utf-8");
+  mkdirSync(dirname(launcherPath), { recursive: true, mode: 0o700 });
+  writeFileSync(launcherPath, getWindowsHiddenLauncherScript(commandLine), { encoding: "utf-8", mode: 0o600 });
   return launcherPath;
 }
 
@@ -129,7 +129,8 @@ function toError(error: unknown): Error {
 }
 
 export async function spawnBrokerIfNeeded(brokerCommand: string, brokerArgs: string[]): Promise<void> {
-  mkdirSync(INTERCOM_DIR, { recursive: true });
+  mkdirSync(INTERCOM_DIR, { recursive: true, mode: 0o700 });
+  if (process.platform !== "win32") chmodSync(INTERCOM_DIR, 0o700);
 
   if (await isBrokerRunning()) {
     return;
@@ -240,7 +241,8 @@ function acquireSpawnLock(): boolean {
   const maxRetries = 5;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      writeFileSync(BROKER_SPAWN_LOCK, `${process.pid}\n${Date.now()}\n`, { flag: "wx" });
+      writeFileSync(BROKER_SPAWN_LOCK, `${process.pid}\n${Date.now()}\n`, { flag: "wx", mode: 0o600 });
+      if (process.platform !== "win32") chmodSync(BROKER_SPAWN_LOCK, 0o600);
       return true;
     } catch (error) {
       if (!(error instanceof Error) || (error as NodeJS.ErrnoException).code !== "EEXIST") {

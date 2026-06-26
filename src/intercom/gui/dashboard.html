@@ -203,17 +203,27 @@ function renderMembers(){
   for (const s of members.values()){
     const el = document.createElement("div");
     const st = s.status || "—";
-    el.className = "member " + statusClass(st);
-    el.innerHTML =
-      `<span class="badge ${statusClass(st)}">${statusLabel(st)}</span>` +
-      `<div class="name"></div><div class="meta"></div>`;
-    el.querySelector(".name").textContent = s.name || short(s.id);
+    const cls = statusClass(st);
+    el.className = "member " + cls;
+
+    const badge = document.createElement("span");
+    badge.className = "badge " + cls;
+    badge.textContent = statusLabel(st);
+
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = s.name || short(s.id);
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
     const cwd = (s.cwd || "").replace(/^.*\//, "…/");   // tail only — full path on hover
     const up = s.startedAt ? fmtDur(now - s.startedAt) : "";
     const idle = s.lastActivity ? "·"+fmtDur(now - s.lastActivity) : "";   // time since last transition
     const dur = [up, idle].filter(Boolean).join(" ");
-    el.querySelector(".meta").textContent = [s.model, cwd, dur].filter(Boolean).join(" · ");
-    if (s.cwd) el.querySelector(".meta").title = s.cwd;
+    meta.textContent = [s.model, cwd, dur].filter(Boolean).join(" · ");
+    if (s.cwd) meta.title = s.cwd;
+
+    el.append(badge, name, meta);
     membersEl.appendChild(el);
   }
 }

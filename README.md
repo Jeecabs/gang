@@ -19,7 +19,7 @@ Built on a vendored, fully-owned copy of [pi-intercom](https://github.com/nicoba
 │  • routes messages                            │
 │  • TAP  → ~/.pi/agent/intercom/intercom.jsonl │  durable, greppable, replayable
 │  • HTTP + SSE :7717  ─────────────────────────┼─► mission control:  /gang watch  (in Pi)
-└───────────────────────────────────────────────┘                     localhost:7717 (browser)
+└───────────────────────────────────────────────┘                     127.0.0.1:7717 (browser)
 ```
 
 ## Requirements
@@ -79,8 +79,8 @@ Watch the gang three ways:
 /gang watch            # or press  alt+g
 
 # 2. in the browser — the same feed, richer
-/gang url              # prints computed localhost URL from GANG_GUI_PORT
-open http://localhost:7717
+/gang url              # prints computed loopback URL from GANG_GUI_PORT
+open http://127.0.0.1:7717
 
 # 3. durable, greppable log of every cross-agent message
 tail -f ~/.pi/agent/intercom/intercom.jsonl
@@ -94,7 +94,7 @@ tail -f ~/.pi/agent/intercom/intercom.jsonl
 | `/gang` | show the roster |
 | `/gang spawn [@name] [-t <level>] <task>` | spawn a member by hand; name optional (auto `m1`, `m2`, …). Levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `/gang clean` · `/gang clean all` | `clean` reaps finished panes (`remain-on-exit` keeps them) and prunes them from the roster; `clean all` kills the whole `gang` session — stops every member |
-| `/gang url` | show the browser mission-control URL (`http://localhost:<GANG_GUI_PORT>`) |
+| `/gang url` | show the browser mission-control URL (`http://127.0.0.1:<GANG_GUI_PORT>`) |
 | `/gang name [name]` | show or set this agent/session's own name |
 | `/gang watch` · `alt+g` | open mission control (in-Pi overlay) |
 | `intercom` tool | message any session: `list` / `send` / `ask` / `reply` |

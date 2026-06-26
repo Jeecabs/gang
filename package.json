@@ -8,7 +8,8 @@
     "pi-package"
   ],
   "scripts": {
-    "test": "tsx --test \"src/**/*.test.ts\""
+    "test": "tsx --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
   },
   "pi": {
     "extensions": [
@@ -23,7 +24,9 @@
     "@earendil-works/pi-coding-agent": "^0.80.2"
   },
   "devDependencies": {
-    "@earendil-works/pi-tui": "^0.80.2"
+    "@earendil-works/pi-tui": "^0.80.2",
+    "@types/node": "^22.20.0",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "tsx": "^4.22.4",

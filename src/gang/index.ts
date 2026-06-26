@@ -3,7 +3,7 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { mkdirSync, writeFileSync } from "fs";
+import { chmodSync, mkdirSync, writeFileSync } from "fs";
 import { basename, join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
@@ -172,7 +172,7 @@ function taskFileContent(role: string, task: string, orchestrator: string): stri
 }
 
 export function missionControlUrl(port = GUI_PORT): string {
-  return `http://localhost:${port}`;
+  return `http://127.0.0.1:${port}`;
 }
 
 function defaultBossName(cwd = process.cwd()): string {
@@ -205,9 +205,11 @@ export default function gangExtension(pi: ExtensionAPI) {
 
   function writeTaskFile(role: string, task: string, index: number): string {
     const dir = join(homedir(), ".pi/agent/gang", roster.runId);
-    mkdirSync(dir, { recursive: true });
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    if (process.platform !== "win32") chmodSync(dir, 0o700);
     const file = join(dir, `${index}-${role}.md`);
-    writeFileSync(file, taskFileContent(role, task, orchestratorName));
+    writeFileSync(file, taskFileContent(role, task, orchestratorName), { mode: 0o600 });
+    if (process.platform !== "win32") chmodSync(file, 0o600);
     return file;
   }
 
@@ -223,7 +225,7 @@ export default function gangExtension(pi: ExtensionAPI) {
     // it onto the bus now so this member can reach us by name without waiting for our next turn.
     if (!pi.getSessionName()?.trim()) {
       pi.setSessionName(orchestratorName);
-      pi.events.emit(BOSS_NAMED_EVENT);
+      pi.events.emit(BOSS_NAMED_EVENT, undefined);
     }
     const index = roster.nextIndex();
     const role = name ?? `m${index + 1}`;
@@ -392,7 +394,7 @@ Only "task" is required for spawn. spawn returns immediately. The member runs it
       thinking: Type.Optional(Type.String({ description: "Optional Pi thinking level for spawn: off, minimal, low, medium, high, or xhigh" })),
       name: Type.Optional(Type.String({ description: "New name for this agent/session when action='name'" })),
     }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<any> {
       const action = params.action;
       if (action === "spawn") {
         if (typeof params.task !== "string" || !params.task) {

@@ -16,6 +16,7 @@ export interface FeedEvent {
  */
 export class FeedClient extends EventEmitter {
   private req?: http.ClientRequest;
+  private reconnectTimer?: NodeJS.Timeout;
   private buf = "";
   private stopped = false;
 
@@ -36,6 +37,7 @@ export class FeedClient extends EventEmitter {
         this.scheduleReconnect();
         return;
       }
+      this.clearReconnectTimer();
       this.emit("status", "up");
       res.setEncoding("utf8");
       res.on("data", (chunk: string) => this.onData(chunk));
@@ -62,14 +64,24 @@ export class FeedClient extends EventEmitter {
   }
 
   private scheduleReconnect(): void {
-    if (this.stopped) return;
+    if (this.stopped || this.reconnectTimer) return;
     this.emit("status", "down");
     this.buf = "";
-    setTimeout(() => this.connect(), 1000);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      this.connect();
+    }, 1000);
+  }
+
+  private clearReconnectTimer(): void {
+    if (!this.reconnectTimer) return;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
   }
 
   stop(): void {
     this.stopped = true;
+    this.clearReconnectTimer();
     this.req?.destroy();
     this.removeAllListeners();
   }
