@@ -9,6 +9,9 @@ test("gang command completes subcommands", () => {
   assert.deepEqual(getGangArgumentCompletions("sp"), [
     { value: "spawn ", label: "spawn", description: "Spawn a member: spawn [@name] [-t <level>] <task>" },
   ]);
+  assert.deepEqual(getGangArgumentCompletions("sto"), [
+    { value: "stop ", label: "stop", description: "Stop one member or stop --all-finished" },
+  ]);
 });
 
 test("gang spawn task text is free-form (no completion)", () => {

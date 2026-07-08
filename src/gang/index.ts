@@ -7,7 +7,7 @@ import { chmodSync, mkdirSync, writeFileSync } from "fs";
 import { basename, join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
-import { ORCHESTRATOR, Roster, buildMemberEnv, isValidRole, type Member } from "./members.ts";
+import { ORCHESTRATOR, Roster, buildMemberEnv, computeMemberRuntimeSnapshot, isValidRole, type Member, type MemberRuntimeSnapshot } from "./members.ts";
 import {
   GANG_SESSION,
   TMUX_BIN,
@@ -18,15 +18,19 @@ import {
   tiledLayoutArgs,
   memberCommand,
   listPanesArgs,
+  listDetailedPanesArgs,
   listAllPanesArgs,
+  listAllDetailedPanesArgs,
   killPaneArgs,
   killSessionArgs,
   parsePaneList,
-  type PaneState,
+  parseDetailedPaneList,
+  type PaneDetails,
 } from "./tmux.ts";
 import { FeedClient } from "./feed-client.ts";
 import { GUI_PORT } from "../intercom/gui/server.js";
 import { MissionControlOverlay } from "./ui/mission-control.ts";
+import { BOSS_NAMED_EVENT, GANG_MEMBER_REPORT_EVENT, type GangMemberReportEvent } from "./events.ts";
 
 const execFileP = promisify(execFile);
 
@@ -39,19 +43,14 @@ const COMMAND_COMPLETIONS: AutocompleteItem[] = [
   { value: "url", label: "url", description: "Show browser mission-control URL" },
   { value: "name ", label: "name", description: "Show or set this session's own name" },
   { value: "spawn ", label: "spawn", description: "Spawn a member: spawn [@name] [-t <level>] <task>" },
-  { value: "list", label: "list", description: "Show spawned members" },
-  { value: "clean", label: "clean", description: "Reap finished panes (clean all = stop everything)" },
+  { value: "list", label: "list", description: "Show spawned members with live pane diagnostics" },
+  { value: "clean", label: "clean", description: "Reap finished panes (clean --force kills reported-done members too)" },
+  { value: "stop ", label: "stop", description: "Stop one member or stop --all-finished" },
 ];
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 type GangToolDetails = Member | { name: string } | { error: true } | undefined;
 type ToolResult = AgentToolResult<GangToolDetails>;
-
-// Emitted when the boss claims its session name on first spawn. The intercom extension listens and
-// re-registers the new presence name on the bus immediately (no turn boundary to wait for), so a
-// freshly-spawned member can address the boss by name right away. Keep this string in sync with the
-// listener in src/intercom/index.ts.
-const BOSS_NAMED_EVENT = "gang:boss-named";
 
 type SpawnCommandParseResult =
   | { ok: true; name?: string; task: string; thinkingLevel?: string }
@@ -232,6 +231,9 @@ export default function gangExtension(pi: ExtensionAPI) {
     }
     const index = roster.nextIndex();
     const role = name ?? `m${index + 1}`;
+    if (roster.hasRole(role)) {
+      throw new Error(`Member "${role}" already exists in this gang. Stop it first or choose a different role.`);
+    }
     const taskFile = writeTaskFile(role, task, index);
     // Forward PATH so the pane resolves `pi` even if the tmux server started with a minimal env.
     const env = { PATH: process.env.PATH ?? "", ...buildMemberEnv({ role, runId: roster.runId, index, orchestrator: orchestratorName }) };
@@ -273,56 +275,130 @@ export default function gangExtension(pi: ExtensionAPI) {
     }
   }
 
+  function relativeAge(timestamp?: number): string {
+    if (!timestamp) return "never";
+    const ms = Math.max(0, Date.now() - timestamp);
+    if (ms < 1000) return "just now";
+    const seconds = Math.floor(ms / 1000);
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  }
+
+  async function loadTrackedPaneDetails(): Promise<{ panes: Map<string, PaneDetails>; warning?: string }> {
+    const members = roster.list();
+    if (members.length === 0) return { panes: new Map() };
+    const ids = new Set(members.map((member) => member.paneId));
+    try {
+      const listed = inTmux
+        ? parseDetailedPaneList(await runTmux(listAllDetailedPanesArgs()))
+        : parseDetailedPaneList(await runTmux(listDetailedPanesArgs()));
+      const panes = new Map(listed.filter((pane) => ids.has(pane.paneId)).map((pane) => [pane.paneId, pane]));
+      return { panes };
+    } catch (error) {
+      return {
+        panes: new Map(),
+        warning: inTmux
+          ? `Couldn't list tmux panes (${getErrorMessage(error)})`
+          : "No gang session",
+      };
+    }
+  }
+
+  async function loadMemberSnapshots(): Promise<{ snapshots: MemberRuntimeSnapshot[]; warning?: string }> {
+    const { panes, warning } = await loadTrackedPaneDetails();
+    return {
+      snapshots: roster.list().map((member) => computeMemberRuntimeSnapshot(member, panes.get(member.paneId))),
+      warning,
+    };
+  }
+
+  async function killExistingPanes(snapshots: MemberRuntimeSnapshot[]): Promise<number> {
+    let killed = 0;
+    const seen = new Set<string>();
+    for (const snapshot of snapshots) {
+      if (!snapshot.paneExists || seen.has(snapshot.member.paneId)) continue;
+      seen.add(snapshot.member.paneId);
+      await runTmux(killPaneArgs(snapshot.member.paneId)).catch(() => {});
+      killed += 1;
+    }
+    return killed;
+  }
+
+  async function stopMember(role: string): Promise<string> {
+    const known = roster.findByRole(role);
+    if (!known) return `No gang member named "${role}".`;
+    const { snapshots, warning } = await loadMemberSnapshots();
+    const target = snapshots.find((snapshot) => snapshot.member.role === role) ?? computeMemberRuntimeSnapshot(known);
+    const killed = await killExistingPanes([target]);
+    roster.removeByRoles(new Set([role]));
+    const reason = target.state === "running"
+      ? "killed a live pane"
+      : target.state === "reported_done"
+        ? "killed a reported-done pane"
+        : target.state === "pane_dead"
+          ? "reaped a finished pane"
+          : "pane was already gone";
+    return `${warning ? `${warning}. ` : ""}Stopped "${role}": ${reason}; removed it from the roster.`;
+  }
+
+  async function stopFinishedMembers(): Promise<string> {
+    const { snapshots, warning } = await loadMemberSnapshots();
+    if (snapshots.length === 0) return "No gang members to stop.";
+    const finished = snapshots.filter((snapshot) => snapshot.reapable);
+    if (finished.length === 0) {
+      return `${warning ? `${warning}. ` : ""}No finished members to stop — ${count(snapshots.length, "member")} still running.`;
+    }
+    const killed = await killExistingPanes(finished);
+    const removed = roster.removeByRoles(new Set(finished.map((snapshot) => snapshot.member.role)));
+    const reported = finished.filter((snapshot) => snapshot.state === "reported_done").length;
+    const dead = finished.filter((snapshot) => snapshot.state === "pane_dead").length;
+    const missing = finished.filter((snapshot) => snapshot.state === "pane_missing").length;
+    return `${warning ? `${warning}. ` : ""}Stopped ${count(removed, "finished member")}: killed ${count(killed, "pane")}; removed ${reported} reported_done, ${dead} pane_dead, ${missing} pane_missing. ${count(roster.list().length, "member")} still running.`;
+  }
+
   /**
-   * Reap finished members. Default: kill dead panes (pi process exited but remain-on-exit kept the
-   * pane) and prune them from the roster, leaving running members alone. `all`: stop every member
-   * (kill-session when detached; kill each member pane when pi runs inside tmux).
+   * Reap finished members. Default: kill dead panes and prune missing panes from the roster, leaving
+   * running members alone. `force`: also kills members that already reported back. `all`: stop every
+   * tracked member (kill-session when detached; kill each member pane when pi runs inside tmux).
    */
-  async function cleanGang(opts: { all?: boolean } = {}): Promise<string> {
-    // Find the member panes. In-tmux they live among the user's own panes, so locate them by roster
-    // pane id server-wide; detached mode lists the dedicated session.
-    let panes: PaneState[];
-    if (inTmux) {
-      const ids = new Set(roster.list().map((m) => m.paneId));
-      if (ids.size === 0) return "No gang members to clean.";
-      try {
-        panes = parsePaneList(await runTmux(listAllPanesArgs())).filter((p) => ids.has(p.paneId));
-      } catch (error) {
-        // A failed listing ≠ members are gone — keep the roster so we don't lose track of live panes.
-        return `Couldn't list tmux panes (${getErrorMessage(error)}); roster left intact (${count(ids.size, "member")}).`;
-      }
-    } else {
-      try {
-        panes = parsePaneList(await runTmux(listPanesArgs()));
-      } catch {
-        // No gang session → nothing live. Sync the roster so /gang list matches reality.
-        const dropped = roster.list().length;
-        roster.clear();
-        return dropped ? `No gang session — cleared ${count(dropped, "stale member")} from the roster.` : "No gang session — nothing to clean.";
-      }
+  async function cleanGang(opts: { all?: boolean; force?: boolean } = {}): Promise<string> {
+    const { snapshots, warning } = await loadMemberSnapshots();
+    if (snapshots.length === 0) {
+      return warning === "No gang session" ? "No gang session — nothing to clean." : "No gang members to clean.";
     }
 
     if (opts.all) {
-      // In-tmux: kill member panes individually — never kill-session, that would take down the user's pi.
-      // Only this boss's direct members are reaped; a sub-member a member spawned lives in that member's
-      // own roster, so killing the member's pane orphans it. Use detached mode (kill-session tears down
-      // the whole tree) when you need a guaranteed full stop.
-      if (inTmux) for (const p of panes) await runTmux(killPaneArgs(p.paneId)).catch(() => {});
-      else await runTmux(killSessionArgs()).catch(() => {});
+      if (inTmux) await killExistingPanes(snapshots);
+      else if (warning !== "No gang session") await runTmux(killSessionArgs()).catch(() => {});
       const stopped = roster.list().length;
       roster.clear();
-      return `Stopped the gang: killed ${count(panes.length, inTmux ? "member pane" : "pane")}, cleared ${count(stopped, "member")}.`;
+      return `${warning && warning !== "No gang session" ? `${warning}. ` : ""}Stopped the gang: cleared ${count(stopped, "member")}.`;
     }
 
-    const dead = panes.filter((p) => p.dead);
-    for (const p of dead) await runTmux(killPaneArgs(p.paneId)).catch(() => {});
-    const alive = new Set(panes.filter((p) => !p.dead).map((p) => p.paneId));
-    const pruned = roster.prune(alive);
-    const running = roster.list().length;   // not alive.size — that counts the session's idle shell pane too
-    if (dead.length === 0 && pruned === 0) {
-      return `Nothing to reap — ${count(running, "member")} still running.`;
+    if (opts.force) {
+      const forceTargets = snapshots.filter((snapshot) => snapshot.reapable);
+      if (forceTargets.length === 0) {
+        return `${warning ? `${warning}. ` : ""}Nothing to force-clean — ${count(snapshots.length, "member")} still running.`;
+      }
+      const killed = await killExistingPanes(forceTargets);
+      const removed = roster.removeByRoles(new Set(forceTargets.map((snapshot) => snapshot.member.role)));
+      return `${warning ? `${warning}. ` : ""}Force-cleaned ${count(removed, "member")}: killed ${count(killed, "pane")}. ${count(roster.list().length, "member")} still running.`;
     }
-    return `Reaped ${count(dead.length, "finished pane")}, pruned ${pruned} from the roster. ${count(running, "member")} still running.`;
+
+    const dead = snapshots.filter((snapshot) => snapshot.state === "pane_dead");
+    const missing = snapshots.filter((snapshot) => snapshot.state === "pane_missing");
+    const killed = await killExistingPanes(dead);
+    const removed = roster.removeByRoles(new Set([...dead, ...missing].map((snapshot) => snapshot.member.role)));
+    const running = roster.list().length;
+    if (dead.length === 0 && missing.length === 0) {
+      return `${warning ? `${warning}. ` : ""}Nothing to reap — ${count(running, "member")} still running.`;
+    }
+    return `${warning ? `${warning}. ` : ""}Reaped ${count(killed, "finished pane")}, pruned ${count(removed - dead.length, "stale member")} from the roster. ${count(running, "member")} still running.`;
   }
 
   // Where to look for members: in-tmux they're splits in the current window; else the detached session.
@@ -330,18 +406,23 @@ export default function gangExtension(pi: ExtensionAPI) {
     return inTmux ? "Members are splits in your current tmux window." : `Watch live: tmux attach -t ${GANG_SESSION}`;
   }
 
-  function formatRoster(): string {
-    const members = roster.list();
+  async function formatRoster(): Promise<string> {
     const watch = watchHint();
-    if (members.length === 0) {
+    const { snapshots, warning } = await loadMemberSnapshots();
+    if (snapshots.length === 0) {
       return `No gang members spawned yet (run ${roster.runId.slice(0, 8)}). Use \`/gang spawn <task>\` to launch one.`;
     }
-    const rows = members.map((m) => {
+    const rows = snapshots.map((snapshot) => {
+      const m = snapshot.member;
       const preview = m.task.replace(/\s+/g, " ").slice(0, 60);
       const thinking = m.thinkingLevel ? ` — thinking ${m.thinkingLevel}` : "";
-      return `• ${m.role} — pane ${m.paneId}${thinking} — ${preview}`;
+      const command = snapshot.currentCommand ? ` — cmd ${snapshot.currentCommand}` : "";
+      const reported = m.reportedDoneAt ? ` — reported ${relativeAge(m.reportedDoneAt)}` : " — reported no";
+      const lastReport = m.lastReportText ? ` — last: ${m.lastReportText.replace(/\s+/g, " ").slice(0, 40)}` : "";
+      return `• ${m.role} — pane ${m.paneId}${thinking} — ${snapshot.state} — exists ${snapshot.paneExists ? "yes" : "no"} — alive ${snapshot.processAlive ? "yes" : "no"}${command}${reported} — reapable ${snapshot.reapable ? "yes" : "no"}${lastReport} — ${preview}`;
     });
-    return `Gang members (run ${roster.runId.slice(0, 8)}). ${watch}\n${rows.join("\n")}`;
+    const diagnostic = warning ? `\ntmux: ${warning}` : "";
+    return `Gang members (run ${roster.runId.slice(0, 8)}). ${watch}${diagnostic}\n${rows.join("\n")}`;
   }
 
   function spawnedMessage(m: Member): string {
@@ -376,6 +457,13 @@ export default function gangExtension(pi: ExtensionAPI) {
     orchestratorName = existingName || defaultBossName(ctx.cwd ?? process.cwd());
   });
 
+  pi.events.on(GANG_MEMBER_REPORT_EVENT, (payload) => {
+    const report = payload as GangMemberReportEvent | undefined;
+    const sender = report?.fromName?.trim() || report?.fromId?.trim() || "";
+    if (!sender || report?.expectsReply) return;
+    roster.markReportedDone(sender, report?.timestamp, report?.text);
+  });
+
   pi.registerTool({
     name: "gang",
     label: "Gang",
@@ -384,18 +472,24 @@ export default function gangExtension(pi: ExtensionAPI) {
 Usage:
   gang({ action: "spawn", task: "..." })                                       → launch a member (auto-named m1, m2, …)
   gang({ action: "spawn", task: "...", role: "reviewer", thinking: "high" })   → launch with an explicit name
-  gang({ action: "list" })                                                     → show the members you've spawned
-  gang({ action: "clean" })                                                    → reap finished panes + prune the roster
+  gang({ action: "list" })                                                     → show members with live pane diagnostics
+  gang({ action: "clean" })                                                    → reap dead/missing panes + prune the roster
+  gang({ action: "clean", force: true })                                       → also kill members that already reported back
+  gang({ action: "stop", role: "reviewer" })                                 → stop one member immediately
+  gang({ action: "stop", finished: true })                                     → stop all reapable members
   gang({ action: "name", name: "boss of private evals" })                      → name this agent/session
 
 Only "task" is required for spawn. spawn returns immediately. The member runs its own pi session in a tmux pane (${inTmux ? "split into your current window" : `watch: tmux attach -t ${GANG_SESSION}`}). When done it sends its result back to you ("boss") as an intercom message — it does NOT return here. Keep working; handle the result when it arrives.`,
-    promptSnippet: `Spawn visible subagent members in tmux panes (gang spawn with a task; role/name is optional and auto-assigned), list them (gang list), or name the current agent/session (gang name). When you spin up a teammate or need a specific identity, name yourself first with gang({ action: "name", name: "<clear role/name>" }). Spawn results return asynchronously as intercom messages, not tool results.`,
+    promptSnippet: `Spawn visible subagent members in tmux panes (gang spawn with a task; role/name is optional and auto-assigned), inspect them with live pane diagnostics (gang list), clean them up (gang clean / stop), or name the current agent/session (gang name). When you spin up a teammate or need a specific identity, name yourself first with gang({ action: "name", name: "<clear role/name>" }). Spawn results return asynchronously as intercom messages, not tool results.`,
     parameters: Type.Object({
-      action: Type.String({ description: "'spawn', 'list', 'clean', or 'name'" }),
-      role: Type.Optional(Type.String({ description: "Optional name/role for the spawned member, e.g. 'reviewer'. Auto-assigned (m1, m2, …) if omitted; the member usually renames itself." })),
+      action: Type.String({ description: "'spawn', 'list', 'clean', 'stop', or 'name'" }),
+      role: Type.Optional(Type.String({ description: "Spawn name/role, or the specific member to stop when action='stop'." })),
       task: Type.Optional(Type.String({ description: "What the member should do (required for spawn)" })),
       thinking: Type.Optional(Type.String({ description: "Optional Pi thinking level for spawn: off, minimal, low, medium, high, or xhigh" })),
       name: Type.Optional(Type.String({ description: "New name for this agent/session when action='name'" })),
+      all: Type.Optional(Type.Boolean({ description: "When action='clean', stop every tracked member." })),
+      force: Type.Optional(Type.Boolean({ description: "When action='clean', also kill members that already reported back." })),
+      finished: Type.Optional(Type.Boolean({ description: "When action='stop', stop all reapable members instead of one named role." })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<ToolResult> {
       const action = params.action;
@@ -414,10 +508,20 @@ Only "task" is required for spawn. spawn returns immediately. The member runs it
         }
       }
       if (action === "list") {
-        return { content: [{ type: "text", text: formatRoster() }], details: undefined };
+        return { content: [{ type: "text", text: await formatRoster() }], details: undefined };
       }
       if (action === "clean") {
-        return { content: [{ type: "text", text: await cleanGang() }], details: undefined };
+        return { content: [{ type: "text", text: await cleanGang({ all: params.all === true, force: params.force === true }) }], details: undefined };
+      }
+      if (action === "stop") {
+        if (params.finished === true) {
+          return { content: [{ type: "text", text: await stopFinishedMembers() }], details: undefined };
+        }
+        const role = typeof params.role === "string" ? params.role.trim() : "";
+        if (!role) {
+          return { content: [{ type: "text", text: "stop requires 'role', or set finished:true to stop all reapable members." }], details: { error: true } };
+        }
+        return { content: [{ type: "text", text: await stopMember(role) }], details: undefined };
       }
       if (action === "name") {
         const nextName = typeof params.name === "string" ? params.name.trim() : "";
@@ -429,7 +533,7 @@ Only "task" is required for spawn. spawn returns immediately. The member runs it
         orchestratorName = nextName;
         return { content: [{ type: "text", text: `Agent name set: ${nextName}` }], details: { name: nextName } };
       }
-      return { content: [{ type: "text", text: `Unknown action "${action}". Use 'spawn', 'list', 'clean', or 'name'.` }], details: { error: true } };
+      return { content: [{ type: "text", text: `Unknown action "${action}". Use 'spawn', 'list', 'clean', 'stop', or 'name'.` }], details: { error: true } };
     },
   });
 
@@ -466,11 +570,23 @@ Only "task" is required for spawn. spawn returns immediately. The member runs it
         return;
       }
       if (trimmed === "" || trimmed === "list") {
-        say(formatRoster(), "info");
+        say(await formatRoster(), "info");
         return;
       }
-      if (trimmed === "clean" || trimmed === "clean all") {
-        say(await cleanGang({ all: trimmed === "clean all" }), "info");
+      if (trimmed === "clean" || trimmed === "clean all" || trimmed === "clean --force") {
+        say(await cleanGang({ all: trimmed === "clean all", force: trimmed === "clean --force" }), "info");
+        return;
+      }
+      if (trimmed === "stop") {
+        say("Usage: /gang stop <member> or /gang stop --all-finished", "warning");
+        return;
+      }
+      if (trimmed === "stop --all-finished") {
+        say(await stopFinishedMembers(), "info");
+        return;
+      }
+      if (trimmed.startsWith("stop ")) {
+        say(await stopMember(trimmed.slice("stop ".length).trim()), "info");
         return;
       }
       if (trimmed.startsWith("spawn")) {
@@ -489,7 +605,7 @@ Only "task" is required for spawn. spawn returns immediately. The member runs it
         }
         return;
       }
-      say(`Unknown gang command "${trimmed}". Use /gang, /gang list, /gang clean [all], /gang url, /gang name <name>, /gang watch, or /gang spawn [@name] [-t <level>] <task>.`, "warning");
+      say(`Unknown gang command "${trimmed}". Use /gang, /gang list, /gang clean [all|--force], /gang stop <member>, /gang stop --all-finished, /gang url, /gang name <name>, /gang watch, or /gang spawn [@name] [-t <level>] <task>.`, "warning");
     },
   });
 

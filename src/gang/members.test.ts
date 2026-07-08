@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildMemberEnv, isValidRole, Roster, ORCHESTRATOR } from "./members.ts";
+import { buildMemberEnv, computeMemberRuntimeSnapshot, isValidRole, Roster, ORCHESTRATOR } from "./members.ts";
 
 test("buildMemberEnv sets the 5 PI_SUBAGENT_* vars intercom reads", () => {
   const env = buildMemberEnv({ role: "worker", runId: "run-1", index: 2 });
@@ -38,6 +38,35 @@ test("Roster.prune keeps only members whose pane is still alive", () => {
   const removed = r.prune(new Set(["%2"]));   // %1 and %3 are gone/dead
   assert.equal(removed, 2);
   assert.deepEqual(r.list().map((m) => m.role), ["b"]);
+});
+
+test("Roster marks done reports and can remove by role", () => {
+  const r = new Roster();
+  r.add({ role: "a", task: "t", index: 0, paneId: "%1", runId: r.runId, spawnedAt: 1 });
+  assert.equal(r.hasRole("a"), true);
+  assert.equal(r.markReportedDone("a", 42, "done"), true);
+  assert.equal(r.findByRole("a")?.reportedDoneAt, 42);
+  assert.equal(r.findByRole("a")?.lastReportText, "done");
+  assert.equal(r.removeByRoles(new Set(["a"])), 1);
+  assert.equal(r.list().length, 0);
+});
+
+test("computeMemberRuntimeSnapshot classifies running, reported, dead, and missing panes", () => {
+  const member = { role: "a", task: "t", index: 0, paneId: "%1", runId: "run", spawnedAt: 1 };
+  assert.deepEqual(computeMemberRuntimeSnapshot(member, { paneId: "%1", dead: false, currentCommand: "pi", pid: 100 }), {
+    member,
+    paneExists: true,
+    paneDead: false,
+    processAlive: true,
+    currentCommand: "pi",
+    reportedDone: false,
+    state: "running",
+    reapable: false,
+  });
+  const reported = { ...member, reportedDoneAt: 9 };
+  assert.equal(computeMemberRuntimeSnapshot(reported, { paneId: "%1", dead: false, currentCommand: "pi", pid: 100 }).state, "reported_done");
+  assert.equal(computeMemberRuntimeSnapshot(member, { paneId: "%1", dead: true, currentCommand: "pi", pid: 100 }).state, "pane_dead");
+  assert.equal(computeMemberRuntimeSnapshot(member).state, "pane_missing");
 });
 
 test("Roster.clear empties the roster", () => {
