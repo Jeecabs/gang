@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { envFlags, splitArgs, newSessionArgs, tiledLayoutArgs, remainOnExitArgs, memberCommand, listPanesArgs, listAllPanesArgs, killPaneArgs, killSessionArgs, parsePaneList } from "./tmux.ts";
+import { envFlags, splitArgs, newSessionArgs, tiledLayoutArgs, remainOnExitArgs, memberCommand, listPanesArgs, listDetailedPanesArgs, listAllPanesArgs, listAllDetailedPanesArgs, killPaneArgs, killSessionArgs, parsePaneList, parseDetailedPaneList } from "./tmux.ts";
 
 test("envFlags emits one -e KEY=VAL pair per var", () => {
   assert.deepEqual(envFlags({ A: "1", B: "2" }), ["-e", "A=1", "-e", "B=2"]);
@@ -28,6 +28,7 @@ test("in-tmux builders target pi's own pane so members land in pi's window", () 
   ]);
   assert.deepEqual(tiledLayoutArgs("%0"), ["select-layout", "-t", "%0", "tiled"]);
   assert.deepEqual(listAllPanesArgs(), ["list-panes", "-a", "-F", "#{pane_id} #{pane_dead}"]);
+  assert.deepEqual(listAllDetailedPanesArgs(), ["list-panes", "-a", "-F", "#{pane_id}\t#{pane_dead}\t#{pane_current_command}\t#{pane_pid}"]);
 });
 
 test("memberCommand loads exactly intercom+gang and passes the task as a quoted @file", () => {
@@ -44,6 +45,7 @@ test("memberCommand passes an optional thinking level", () => {
 
 test("cleanup builders target the gang session/pane", () => {
   assert.deepEqual(listPanesArgs(), ["list-panes", "-t", "gang", "-F", "#{pane_id} #{pane_dead}"]);
+  assert.deepEqual(listDetailedPanesArgs(), ["list-panes", "-t", "gang", "-F", "#{pane_id}\t#{pane_dead}\t#{pane_current_command}\t#{pane_pid}"]);
   assert.deepEqual(killPaneArgs("%4"), ["kill-pane", "-t", "%4"]);
   assert.deepEqual(killSessionArgs(), ["kill-session", "-t", "gang"]);
 });
@@ -55,4 +57,12 @@ test("parsePaneList reads pane id + dead flag, ignoring blank lines", () => {
     { paneId: "%3", dead: false },
   ]);
   assert.deepEqual(parsePaneList(""), []);
+});
+
+test("parseDetailedPaneList reads pane diagnostics", () => {
+  assert.deepEqual(parseDetailedPaneList("%1\t0\tpi\t123\n%2\t1\tbash\t456\n"), [
+    { paneId: "%1", dead: false, currentCommand: "pi", pid: 123 },
+    { paneId: "%2", dead: true, currentCommand: "bash", pid: 456 },
+  ]);
+  assert.deepEqual(parseDetailedPaneList(""), []);
 });

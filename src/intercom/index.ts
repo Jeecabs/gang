@@ -8,6 +8,7 @@ import { SessionListOverlay } from "./ui/session-list.ts";
 import { ComposeOverlay, type ComposeResult } from "./ui/compose.ts";
 import { InlineMessageComponent } from "./ui/inline-message.ts";
 import { loadConfig, type IntercomConfig } from "./config.ts";
+import { BOSS_NAMED_EVENT, GANG_MEMBER_REPORT_EVENT } from "../gang/events.ts";
 import type { SessionInfo, Message, Attachment } from "./types.ts";
 import { ReplyTracker } from "./reply-tracker.ts";
 
@@ -689,6 +690,14 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       ? `intercom({ action: "reply", message: "..." })`
       : undefined;
     replyTracker.recordIncomingMessage(from, message);
+    pi.events.emit(GANG_MEMBER_REPORT_EVENT, {
+      fromId: from.id,
+      fromName: from.name,
+      text: message.content.text,
+      timestamp: message.timestamp,
+      expectsReply: message.expectsReply === true,
+      replyTo: message.replyTo,
+    });
     const entry = { from, message, replyCommand, bodyText };
     void (async () => {
       const activeContext = getLiveContext(liveContext, messageGeneration);
@@ -940,7 +949,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
   // The gang extension names an orchestrator session lazily (on its first spawn) instead of at
   // startup, to keep `pi -r` clean. Push the new presence name to the broker the moment it does, so
   // a just-spawned member can address the boss by name without waiting for the next turn boundary.
-  pi.events.on("gang:boss-named", () => {
+  pi.events.on(BOSS_NAMED_EVENT, () => {
     if (currentSessionId) {
       syncPresenceIdentity(currentSessionId);
     }

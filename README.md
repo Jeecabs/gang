@@ -96,10 +96,11 @@ tail -f ~/.pi/agent/intercom/intercom.jsonl
 
 | Surface | What |
 |---|---|
-| `gang` tool | `{action:"spawn", task, role?, thinking?}` · `{action:"list"}` · `{action:"name", name}` — model-callable |
+| `gang` tool | `{action:"spawn", task, role?, thinking?}` · `{action:"list"}` · `{action:"clean", force?, all?}` · `{action:"stop", role? finished?}` · `{action:"name", name}` — model-callable |
 | `/gang` | show the roster |
 | `/gang spawn [@name] [-t <level>] <task>` | spawn a member by hand; name optional (auto `m1`, `m2`, …). Levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
-| `/gang clean` · `/gang clean all` | `clean` reaps finished panes (`remain-on-exit` keeps them) and prunes them from the roster; `clean all` stops this boss's members (detached mode kills the `gang` session; in-tmux mode kills direct member panes only) |
+| `/gang clean` · `/gang clean --force` · `/gang clean all` | `clean` reaps dead/missing panes and prunes stale roster entries; `clean --force` also kills members that already reported back; `clean all` stops this boss's members (detached mode kills the `gang` session; in-tmux mode kills direct member panes only) |
+| `/gang stop <member>` · `/gang stop --all-finished` | stop one member immediately, or bulk-stop any member already reapable (`reported_done`, `pane_dead`, `pane_missing`) |
 | `/gang url` | show the browser mission-control URL (`http://127.0.0.1:<GANG_GUI_PORT>`) |
 | `/gang name [name]` | show or set this agent/session's own name |
 | `/gang watch` · `alt+g` | open mission control (in-Pi overlay) |
@@ -107,7 +108,7 @@ tail -f ~/.pi/agent/intercom/intercom.jsonl
 
 Env knobs: `GANG_GUI_PORT` (default `7717`), `GANG_TMUX_BIN` (default Homebrew tmux), `GANG_FEED_HOURS` (mission-control feed recency window, default `6`).
 
-Finished members linger on purpose — their panes stay (`remain-on-exit on`) so you can read the final state. Reap them when you're done with `/gang clean` (or `gang({ action: "clean" })`). `/gang clean all` tears down the detached `gang` session outside tmux; inside tmux it kills this boss's direct member panes only.
+Finished members linger on purpose — their panes stay (`remain-on-exit on`) so you can read the final state. Reap them when you're done with `/gang clean` (or `gang({ action: "clean" })`). If a member has already reported back but its pane is still hanging around, use `/gang clean --force` or `/gang stop --all-finished`. `/gang stop <member>` is the first-class escape hatch when you know a specific pane should die. `/gang clean all` tears down the detached `gang` session outside tmux; inside tmux it kills this boss's direct member panes only.
 
 Agent naming: an unnamed orchestrator session claims `boss of <current-folder>` (e.g. `boss of private-evals`) **on its first spawn**, not at startup — so plain Pi sessions stay unnamed in the `pi -r` resume list. Use `/gang name <name>` before spawning to pick a custom target; spawned members get that exact supervisor name. Member task prompts also tell agents to name themselves with `gang({ action: "name", name: "<clear role/name>" })` before spinning up their own teammate.
 

@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import type { PaneDetails } from "./tmux.ts";
 
 /** The supervisor every member reports to. */
 export const ORCHESTRATOR = "boss";
@@ -12,6 +13,42 @@ export interface Member {
   runId: string;
   spawnedAt: number;
   thinkingLevel?: string;
+  reportedDoneAt?: number;
+  lastReportText?: string;
+}
+
+export interface MemberRuntimeSnapshot {
+  member: Member;
+  paneExists: boolean;
+  paneDead: boolean;
+  processAlive: boolean;
+  currentCommand?: string;
+  reportedDone: boolean;
+  state: "running" | "reported_done" | "pane_dead" | "pane_missing";
+  reapable: boolean;
+}
+
+export function computeMemberRuntimeSnapshot(member: Member, pane?: PaneDetails): MemberRuntimeSnapshot {
+  const paneExists = !!pane;
+  const paneDead = pane?.dead ?? false;
+  const reportedDone = typeof member.reportedDoneAt === "number";
+  const state = !paneExists
+    ? "pane_missing"
+    : paneDead
+      ? "pane_dead"
+      : reportedDone
+        ? "reported_done"
+        : "running";
+  return {
+    member,
+    paneExists,
+    paneDead,
+    processAlive: paneExists && !paneDead,
+    currentCommand: pane?.currentCommand,
+    reportedDone,
+    state,
+    reapable: state !== "running",
+  };
 }
 
 /**
@@ -48,8 +85,30 @@ export class Roster {
     this.members.push(member);
   }
 
+  hasRole(role: string): boolean {
+    return this.members.some((member) => member.role === role);
+  }
+
+  findByRole(role: string): Member | undefined {
+    return this.members.find((member) => member.role === role);
+  }
+
+  markReportedDone(role: string, reportedDoneAt = Date.now(), text?: string): boolean {
+    const member = this.findByRole(role);
+    if (!member) return false;
+    member.reportedDoneAt = reportedDoneAt;
+    if (typeof text === "string" && text.trim()) member.lastReportText = text.trim();
+    return true;
+  }
+
   list(): Member[] {
     return [...this.members];
+  }
+
+  removeByRoles(roles: Set<string>): number {
+    const before = this.members.length;
+    this.members = this.members.filter((member) => !roles.has(member.role));
+    return before - this.members.length;
   }
 
   /** Drop members whose pane is gone/dead; returns how many were removed. */

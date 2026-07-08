@@ -63,9 +63,19 @@ export function listPanesArgs(session = GANG_SESSION): string[] {
   return ["list-panes", "-t", session, "-F", "#{pane_id} #{pane_dead}"];
 }
 
+/** List every pane in the session with lightweight live diagnostics. */
+export function listDetailedPanesArgs(session = GANG_SESSION): string[] {
+  return ["list-panes", "-t", session, "-F", "#{pane_id}\t#{pane_dead}\t#{pane_current_command}\t#{pane_pid}"];
+}
+
 /** Server-wide pane list (`-a`) — for in-tmux mode, where members live in the user's own windows. */
 export function listAllPanesArgs(): string[] {
   return ["list-panes", "-a", "-F", "#{pane_id} #{pane_dead}"];
+}
+
+/** Server-wide pane list with lightweight live diagnostics. */
+export function listAllDetailedPanesArgs(): string[] {
+  return ["list-panes", "-a", "-F", "#{pane_id}\t#{pane_dead}\t#{pane_current_command}\t#{pane_pid}"];
 }
 
 /** Reap one finished pane (a member whose pi process exited but remain-on-exit kept it). */
@@ -83,6 +93,11 @@ export interface PaneState {
   dead: boolean;
 }
 
+export interface PaneDetails extends PaneState {
+  currentCommand?: string;
+  pid?: number;
+}
+
 /** Parse `list-panes -F '#{pane_id} #{pane_dead}'` output. `pane_dead` is 1 for a finished pane. */
 export function parsePaneList(stdout: string): PaneState[] {
   return stdout
@@ -92,6 +107,23 @@ export function parsePaneList(stdout: string): PaneState[] {
     .map((line) => {
       const [paneId, dead] = line.split(/\s+/);
       return { paneId, dead: dead === "1" };
+    });
+}
+
+/** Parse tab-separated `list-panes` diagnostics. */
+export function parseDetailedPaneList(stdout: string): PaneDetails[] {
+  return stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [paneId, dead, currentCommand, pid] = line.split("\t");
+      return {
+        paneId,
+        dead: dead === "1",
+        currentCommand: currentCommand || undefined,
+        pid: pid ? Number(pid) : undefined,
+      };
     });
 }
 
