@@ -8,7 +8,7 @@ import { SessionListOverlay } from "./ui/session-list.ts";
 import { ComposeOverlay, type ComposeResult } from "./ui/compose.ts";
 import { InlineMessageComponent } from "./ui/inline-message.ts";
 import { loadConfig, type IntercomConfig } from "./config.ts";
-import { BOSS_NAMED_EVENT, GANG_MEMBER_REPORT_EVENT } from "../gang/events.ts";
+import { SUPERINTENDENT_NAMED_EVENT, GANG_MEMBER_REPORT_EVENT } from "../gang/events.ts";
 import type { SessionInfo, Message, Attachment } from "./types.ts";
 import { ReplyTracker } from "./reply-tracker.ts";
 
@@ -948,8 +948,8 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
   });
   // The gang extension names an orchestrator session lazily (on its first spawn) instead of at
   // startup, to keep `pi -r` clean. Push the new presence name to the broker the moment it does, so
-  // a just-spawned member can address the boss by name without waiting for the next turn boundary.
-  pi.events.on(BOSS_NAMED_EVENT, () => {
+  // a just-spawned member can address the superintendent by name without waiting for the next turn boundary.
+  pi.events.on(SUPERINTENDENT_NAMED_EVENT, () => {
     if (currentSessionId) {
       syncPresenceIdentity(currentSessionId);
     }
@@ -1079,7 +1079,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       name: "contact_supervisor",
       label: "Contact Supervisor",
       description: "Subagent-only tool for contacting the supervisor agent that delegated this task. Use need_decision when blocked, uncertain, needing approval, or facing a product/API/scope decision before continuing; this waits for the supervisor's reply. Use interview_request when multiple structured questions need supervisor answers; this also waits for a reply. Use progress_update only for meaningful progress or unexpected discoveries that change the plan; this does not wait for a reply. Do not use for routine completion handoffs.",
-      promptSnippet: "Subagent-only: contact the supervisor for decisions, structured interviews, or meaningful plan-changing updates. Do not use for routine completion handoffs.",
+      promptSnippet: "Subagent-only: contact the supervisor for decisions or meaningful progress updates; not routine handoffs.",
       promptGuidelines: [
         "Use contact_supervisor with reason='need_decision' when a subagent is blocked, uncertain, needs approval, or faces a product/API/scope decision before continuing.",
         "Use contact_supervisor with reason='interview_request' when the child needs multiple structured answers from the supervisor in one blocking exchange.",
@@ -1344,13 +1344,12 @@ Use this to communicate findings, request help, or coordinate work with other se
 Usage:
   intercom({ action: "list" })                    → List active sessions
   intercom({ action: "send", to: "session-name", message: "..." })  → Send message
-  intercom({ action: "send", to: "boss", message: "...", done: true }) → Subagent: report final result, then end this session
+  intercom({ action: "send", to: "superintendent", message: "...", done: true }) → Subagent: report final result, then end this session
   intercom({ action: "ask", to: "session-name", message: "..." })   → Ask and wait for reply
   intercom({ action: "reply", message: "..." })                      → Reply to the active/single pending ask
   intercom({ action: "pending" })                                      → List unresolved inbound asks
   intercom({ action: "status" })                  → Show connection status`,
-    promptSnippet:
-      "Use to coordinate with other local pi sessions: list peers, send updates, ask for help, or check intercom connectivity.",
+    promptSnippet: "Coordinate with other local Pi sessions.",
 
     parameters: Type.Object({
       action: Type.String({

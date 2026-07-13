@@ -30,7 +30,7 @@ import {
 import { FeedClient } from "./feed-client.ts";
 import { GUI_PORT } from "../intercom/gui/server.js";
 import { MissionControlOverlay } from "./ui/mission-control.ts";
-import { BOSS_NAMED_EVENT, GANG_MEMBER_REPORT_EVENT, type GangMemberReportEvent } from "./events.ts";
+import { SUPERINTENDENT_NAMED_EVENT, GANG_MEMBER_REPORT_EVENT, type GangMemberReportEvent } from "./events.ts";
 
 const execFileP = promisify(execFile);
 
@@ -177,9 +177,9 @@ export function missionControlUrl(port = GUI_PORT): string {
   return `http://127.0.0.1:${port}`;
 }
 
-function defaultBossName(cwd = process.cwd()): string {
+function defaultSuperintendentName(cwd = process.cwd()): string {
   const project = basename(cwd).trim();
-  return project ? `boss of ${project}` : ORCHESTRATOR;
+  return project ? `superintendent of ${project}` : ORCHESTRATOR;
 }
 
 export default function gangExtension(pi: ExtensionAPI) {
@@ -188,7 +188,7 @@ export default function gangExtension(pi: ExtensionAPI) {
   // When pi itself runs inside tmux (and exposes its pane via $TMUX_PANE), members split into pi's own
   // window — visible alongside pi; otherwise they go to a dedicated detached `gang` session you attach
   // to. Gate on TMUX_PANE so we always have a concrete pane to target (a no-`-t` split lands in whatever
-  // window is *currently active*, not pi's); no pane → fall back to detached. Fixed per boss process.
+  // window is *currently active*, not pi's); no pane → fall back to detached. Fixed per superintendent process.
   const tmuxPane = process.env.TMUX_PANE ?? "";
   const inTmux = !!process.env.TMUX && !!tmuxPane;
 
@@ -223,11 +223,11 @@ export default function gangExtension(pi: ExtensionAPI) {
     if (thinkingLevel && !isThinkingLevel(thinkingLevel)) {
       throw new Error(`Invalid thinking level "${thinkingLevel}". Use off, minimal, low, medium, high, or xhigh.`);
     }
-    // Claim the boss identity lazily — first spawn is when we actually need to be addressable. Push
+    // Claim the superintendent identity lazily — first spawn is when we actually need to be addressable. Push
     // it onto the bus now so this member can reach us by name without waiting for our next turn.
     if (!pi.getSessionName()?.trim()) {
       pi.setSessionName(orchestratorName);
-      pi.events.emit(BOSS_NAMED_EVENT, undefined);
+      pi.events.emit(SUPERINTENDENT_NAMED_EVENT, undefined);
     }
     const index = roster.nextIndex();
     const role = name ?? `m${index + 1}`;
@@ -449,12 +449,12 @@ export default function gangExtension(pi: ExtensionAPI) {
   }
 
   // Compute the orchestrator identity but DON'T persist it yet. Naming every session at startup
-  // floods `pi -r` with identical "boss of <folder>" entries; we claim the name lazily on the first
+  // floods `pi -r` with identical "superintendent of <folder>" entries; we claim the name lazily on the first
   // spawn (see spawnMember), so sessions that never use gang keep their natural resume title.
   // A child already has its --name role as its session name, so existingName keeps that.
   pi.on("session_start", (_event, ctx: ExtensionContext) => {
     const existingName = pi.getSessionName()?.trim();
-    orchestratorName = existingName || defaultBossName(ctx.cwd ?? process.cwd());
+    orchestratorName = existingName || defaultSuperintendentName(ctx.cwd ?? process.cwd());
   });
 
   pi.events.on(GANG_MEMBER_REPORT_EVENT, (payload) => {
@@ -477,10 +477,10 @@ Usage:
   gang({ action: "clean", force: true })                                       → also kill members that already reported back
   gang({ action: "stop", role: "reviewer" })                                 → stop one member immediately
   gang({ action: "stop", finished: true })                                     → stop all reapable members
-  gang({ action: "name", name: "boss of private evals" })                      → name this agent/session
+  gang({ action: "name", name: "superintendent of private evals" })            → name this agent/session
 
-Only "task" is required for spawn. spawn returns immediately. The member runs its own pi session in a tmux pane (${inTmux ? "split into your current window" : `watch: tmux attach -t ${GANG_SESSION}`}). When done it sends its result back to you ("boss") as an intercom message — it does NOT return here. Keep working; handle the result when it arrives.`,
-    promptSnippet: `Spawn visible subagent members in tmux panes (gang spawn with a task; role/name is optional and auto-assigned), inspect them with live pane diagnostics (gang list), clean them up (gang clean / stop), or name the current agent/session (gang name). When you spin up a teammate or need a specific identity, name yourself first with gang({ action: "name", name: "<clear role/name>" }). Spawn results return asynchronously as intercom messages, not tool results.`,
+Only "task" is required for spawn. spawn returns immediately. The member runs its own pi session in a tmux pane (${inTmux ? "split into your current window" : `watch: tmux attach -t ${GANG_SESSION}`}). When done it sends its result back to you ("superintendent") as an intercom message — it does NOT return here. Keep working; handle the result when it arrives.`,
+    promptSnippet: "Spawn and manage visible tmux subagents; name yourself before spawning nested agents; results arrive asynchronously via intercom.",
     parameters: Type.Object({
       action: Type.String({ description: "'spawn', 'list', 'clean', 'stop', or 'name'" }),
       role: Type.Optional(Type.String({ description: "Spawn name/role, or the specific member to stop when action='stop'." })),
