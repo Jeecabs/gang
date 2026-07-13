@@ -1,8 +1,8 @@
 import { randomUUID } from "crypto";
 import type { PaneDetails } from "./tmux.ts";
 
-/** The supervisor every member reports to. */
-export const ORCHESTRATOR = "boss";
+/** The superintendent every member reports to. */
+export const ORCHESTRATOR = "superintendent";
 
 /** A spawned gang member. */
 export interface Member {
@@ -71,7 +71,7 @@ export function isValidRole(role: string): boolean {
   return /^[a-zA-Z][a-zA-Z0-9_-]{0,31}$/.test(role);
 }
 
-/** Tracks the members one boss session has spawned. One runId per boss process. */
+/** Tracks the members one superintendent session has spawned. One runId per superintendent process. */
 export class Roster {
   readonly runId = randomUUID();
   private members: Member[] = [];

@@ -6,12 +6,12 @@ test("buildMemberEnv sets the 5 PI_SUBAGENT_* vars intercom reads", () => {
   const env = buildMemberEnv({ role: "worker", runId: "run-1", index: 2 });
   assert.deepEqual(env, {
     PI_SUBAGENT_INTERCOM_SESSION_NAME: "worker",
-    PI_SUBAGENT_ORCHESTRATOR_TARGET: "boss",
+    PI_SUBAGENT_ORCHESTRATOR_TARGET: "superintendent",
     PI_SUBAGENT_RUN_ID: "run-1",
     PI_SUBAGENT_CHILD_AGENT: "worker",
     PI_SUBAGENT_CHILD_INDEX: "2",
   });
-  assert.equal(ORCHESTRATOR, "boss");
+  assert.equal(ORCHESTRATOR, "superintendent");
 });
 
 test("isValidRole accepts safe tokens, rejects shell/tmux-hostile ones", () => {
@@ -27,7 +27,7 @@ test("Roster hands out monotonic indexes and a stable runId", () => {
   r.add({ role: "worker", task: "t", index: 0, paneId: "%1", runId, spawnedAt: 1 });
   assert.equal(r.list().length, 1);
   assert.equal(r.list()[0].role, "worker");
-  assert.equal(r.runId, runId, "runId is stable for the boss process");
+  assert.equal(r.runId, runId, "runId is stable for the superintendent process");
 });
 
 test("Roster.prune keeps only members whose pane is still alive", () => {

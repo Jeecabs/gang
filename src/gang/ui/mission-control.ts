@@ -18,7 +18,7 @@ export interface MissionState {
   online: boolean;
   /** Current time for uptime/idle math; defaults to Date.now() when omitted (keeps tests deterministic). */
   now?: number;
-  /** role → task, joined from the boss's Roster so each member shows what it's doing. */
+  /** role → task, joined from the superintendent's Roster so each member shows what it's doing. */
   tasks?: Record<string, string>;
 }
 
