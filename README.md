@@ -11,7 +11,7 @@ in your terminal (a Pi overlay) **and** in the browser.
 
 Built on a vendored, fully-owned copy of [pi-intercom](https://github.com/nicobailon/pi-intercom)
 (MIT). No external `pi-intercom` runtime dependency; npm deps install with the package.
-Targets `@earendil-works` Pi **0.80.2**.
+Targets `@earendil-works` Pi **0.80.x** (supported range: `>=0.80.2 <0.81.0`).
 
 ```
 ┌─ tmux panes ──────────────┐   raw per-agent view — watch each member's pi session
@@ -29,23 +29,33 @@ Targets `@earendil-works` Pi **0.80.2**.
 
 ## Requirements
 
-- **Pi** (`@earendil-works/pi-coding-agent`) ≥ 0.80.2 — `pi --version`
+- **Pi** (`@earendil-works/pi-coding-agent`) 0.80.x, ≥ 0.80.2 — `pi --version`
 - **tmux** — members run as visible panes (`brew install tmux`)
 - **Node** ≥ 22
 
 ## Install
 
-### Option A — from GitHub (recommended)
+### Option A — from npm (recommended)
+
+```sh
+pi install pi-gang
+pi list                                           # verify: should list  gang
+```
+
+### Option B — from GitHub
 
 Pi packages run local extension code with your user permissions, so review the source before
 installing. Pi installs the package's runtime dependencies for you on a git install:
 
 ```sh
-pi install ssh://git@github.com/Jeecabs/gang     # private repo → uses your SSH key
+pi install https://github.com/Jeecabs/gang.git
 pi list                                           # verify: should list  gang
 ```
 
-### Option B — local clone (to hack on it)
+SSH also works if your GitHub account is configured for it:
+`pi install ssh://git@github.com/Jeecabs/gang.git`
+
+### Option C — local clone (to hack on it)
 
 ```sh
 git clone git@github.com:Jeecabs/gang.git
