@@ -467,7 +467,9 @@ export default function gangExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "gang",
     label: "Gang",
-    description: `Fire up and track visible subagent "members" as live tmux panes.
+    description: `Optional, user-directed delegation: use gang only when the user explicitly asks for it or approves it. Do not spawn members automatically or silently; if delegation would help, mention gang and ask first.
+
+Fire up and track visible subagent "members" as live tmux panes.
 
 Usage:
   gang({ action: "spawn", task: "..." })                                       → launch a member (auto-named m1, m2, …)
@@ -480,7 +482,7 @@ Usage:
   gang({ action: "name", name: "superintendent of private evals" })            → name this agent/session
 
 Only "task" is required for spawn. spawn returns immediately. The member runs its own pi session in a tmux pane (${inTmux ? "split into your current window" : `watch: tmux attach -t ${GANG_SESSION}`}). When done it sends its result back to you ("superintendent") as an intercom message — it does NOT return here. Keep working; handle the result when it arrives.`,
-    promptSnippet: "Spawn and manage visible tmux subagents; name yourself before spawning nested agents; results arrive asynchronously via intercom.",
+    promptSnippet: "User-directed only: use gang only when the user explicitly asks or approves; never spawn members automatically or silently. If delegation would help, mention gang and ask first. Name yourself before spawning nested agents; results arrive asynchronously via intercom.",
     parameters: Type.Object({
       action: Type.String({ description: "'spawn', 'list', 'clean', 'stop', or 'name'" }),
       role: Type.Optional(Type.String({ description: "Spawn name/role, or the specific member to stop when action='stop'." })),
