@@ -1,5 +1,5 @@
 {
-  "name": "gang",
+  "name": "pi-gang",
   "version": "0.1.0",
   "description": "Minimal, observable subagent primitive for Pi — visible tmux members, cross-agent intercom, and a mission-control GUI.",
   "license": "MIT",
@@ -18,7 +18,9 @@
   ],
   "scripts": {
     "test": "tsx --test \"src/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test",
+    "prepublishOnly": "npm run check"
   },
   "pi": {
     "extensions": [
@@ -33,28 +35,30 @@
     "node": ">=22.19.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*",
-    "typebox": "*"
+    "@earendil-works/pi-coding-agent": ">=0.80.2 <0.81.0",
+    "@earendil-works/pi-tui": ">=0.80.2 <0.81.0",
+    "typebox": ">=1.1.38 <2"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.2",
-    "@earendil-works/pi-tui": "^0.80.2",
-    "@types/node": "^22.20.0",
-    "typebox": "^1.1.38",
+    "@earendil-works/pi-coding-agent": "^0.80.6",
+    "@earendil-works/pi-tui": "^0.80.6",
+    "@types/node": "^22.20.1",
+    "typebox": "^1.3.6",
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "tsx": "^4.22.4"
+    "tsx": "^4.23.1"
   },
-  "main": "index.js",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Jeecabs/gang.git"
   },
-  "author": "",
+  "author": "Lachlan Jacobs",
   "bugs": {
     "url": "https://github.com/Jeecabs/gang/issues"
   },
-  "homepage": "https://github.com/Jeecabs/gang#readme"
+  "homepage": "https://github.com/Jeecabs/gang#readme",
+  "publishConfig": {
+    "access": "public"
+  }
 }

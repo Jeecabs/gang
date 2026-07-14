@@ -1,0 +1,37 @@
+name: Bug report
+description: Report a reproducible problem
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For security issues, do not use this form. See SECURITY.md.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Include the expected and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest reproduction or command sequence.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Include gang, Node, Pi, OS, and tmux versions.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Remove secrets and private data before posting.
+      render: text

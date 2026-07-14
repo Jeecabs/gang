@@ -1,0 +1,11 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "entry": [
+    "src/intercom/index.ts",
+    "src/gang/index.ts"
+  ],
+  "dynamicallyLoaded": [
+    "src/intercom/broker/broker.ts"
+  ],
+  "production": true
+}
