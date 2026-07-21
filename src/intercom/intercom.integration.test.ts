@@ -452,12 +452,27 @@ test("contact supervisor tool renders reason and reply state", async () => {
       interview: { title: "API migration", questions: [] },
     }, renderTheme, {})), /contact_supervisor interview_request API migration\n  Please answer/);
 
-    const warningText = renderToText(supervisorTool.renderResult({
+    const warningResult = {
       content: [{ type: "text", text: "Reply from supervisor:\nUse stable API" }],
       details: { structuredReplyParseError: "reply JSON must include a responses array" },
-    }, { isPartial: false }, renderTheme, { isError: false }));
-    assert.match(warningText, /⚠ Reply from supervisor:\nUse stable API/);
+    };
+    const warningText = renderToText(supervisorTool.renderResult(
+      warningResult,
+      { expanded: false, isPartial: false },
+      renderTheme,
+      { isError: false },
+    ));
+    assert.match(warningText, /⚠ Reply from supervisor: \(Ctrl\+O to expand\)/);
+    assert.doesNotMatch(warningText, /Use stable API/);
     assert.match(warningText, /Structured reply parse issue: reply JSON must include a responses array/);
+
+    const expandedWarningText = renderToText(supervisorTool.renderResult(
+      warningResult,
+      { expanded: true, isPartial: false },
+      renderTheme,
+      { isError: false },
+    ));
+    assert.match(expandedWarningText, /⚠ Reply from supervisor:\nUse stable API/);
 
     const failureText = renderToText(supervisorTool.renderResult({
       content: [{ type: "text", text: "Invalid reason" }],

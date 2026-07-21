@@ -1,4 +1,4 @@
-import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { keyHint, type AgentToolResult, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "crypto";
 import { Type } from "typebox";
 import { Text } from "@earendil-works/pi-tui";
@@ -11,6 +11,7 @@ import { loadConfig, type IntercomConfig } from "./config.ts";
 import { SUPERINTENDENT_NAMED_EVENT, GANG_MEMBER_REPORT_EVENT } from "../gang/events.ts";
 import type { SessionInfo, Message, Attachment } from "./types.ts";
 import { ReplyTracker } from "./reply-tracker.ts";
+import { summarizeResultText } from "../compact-result.ts";
 
 const SUBAGENT_CONTROL_INTERCOM_EVENT = "subagent:control-intercom";
 const SUBAGENT_RESULT_INTERCOM_EVENT = "subagent:result-intercom";
@@ -23,6 +24,14 @@ const SUBAGENT_RUN_ID_ENV = "PI_SUBAGENT_RUN_ID";
 const SUBAGENT_CHILD_AGENT_ENV = "PI_SUBAGENT_CHILD_AGENT";
 const SUBAGENT_CHILD_INDEX_ENV = "PI_SUBAGENT_CHILD_INDEX";
 const SUBAGENT_INTERCOM_SESSION_NAME_ENV = "PI_SUBAGENT_INTERCOM_SESSION_NAME";
+
+function expandHint(): string {
+  try {
+    return keyHint("app.tools.expand", "expand");
+  } catch {
+    return "Ctrl+O to expand";
+  }
+}
 
 interface IntercomToolDetails {
   delivered?: boolean;
@@ -1313,12 +1322,12 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
         }
         return new Text(text, 0, 0);
       },
-      renderResult(result, { isPartial }, theme, context) {
+      renderResult(result, { expanded, isPartial }, theme, context) {
         if (isPartial) {
           return new Text(theme.fg("warning", "Waiting for supervisor..."), 0, 0);
         }
         const details = result.details;
-        const textContent = firstTextContent(result);
+        const summary = summarizeResultText(firstTextContent(result), expanded);
         const failed = Boolean(context.isError || details?.error === true || details?.delivered === false);
         const parseWarning = typeof details?.structuredReplyParseError === "string";
         let text = failed
@@ -1326,7 +1335,8 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
           : parseWarning
             ? theme.fg("warning", "⚠ ")
             : theme.fg("success", "✓ ");
-        text += theme.fg(failed ? "error" : "text", textContent);
+        text += theme.fg(failed ? "error" : "text", summary.text);
+        if (summary.hidden) text += ` ${theme.fg("dim", `(${expandHint()})`)}`;
         if (parseWarning) {
           text += "\n" + theme.fg("warning", `Structured reply parse issue: ${details.structuredReplyParseError}`);
         }
@@ -1708,18 +1718,20 @@ Usage:
       }
       return new Text(text, 0, 0);
     },
-    renderResult(result, { isPartial }, theme, context) {
+    renderResult(result, { expanded, isPartial }, theme, context) {
       if (isPartial) {
         return new Text(theme.fg("warning", "Intercom working..."), 0, 0);
       }
       const details = result.details;
+      const summary = summarizeResultText(firstTextContent(result), expanded);
       const failed = Boolean(context.isError || details?.error === true || details?.delivered === false);
       let text = failed ? theme.fg("error", "✗ ") : theme.fg("success", "✓ ");
-      text += theme.fg(failed ? "error" : "text", firstTextContent(result));
-      if (details?.messageId && !context.expanded) {
+      text += theme.fg(failed ? "error" : "text", summary.text);
+      if (summary.hidden) text += ` ${theme.fg("dim", `(${expandHint()})`)}`;
+      if (details?.messageId && !expanded) {
         text += theme.fg("dim", ` (${details.messageId.slice(0, 8)})`);
       }
-      if (details?.reason && context.expanded) {
+      if (details?.reason && expanded) {
         text += "\n" + theme.fg("dim", `Reason: ${details.reason}`);
       }
       return new Text(text, 0, 0);
