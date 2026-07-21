@@ -1,5 +1,5 @@
-import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AutocompleteItem } from "@earendil-works/pi-tui";
+import { keyHint, type AgentToolResult, type ExtensionAPI, type ExtensionContext, type Theme, type ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
+import { Text, type AutocompleteItem } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -31,6 +31,7 @@ import { FeedClient } from "./feed-client.ts";
 import { GUI_PORT } from "../intercom/gui/server.js";
 import { MissionControlOverlay } from "./ui/mission-control.ts";
 import { SUPERINTENDENT_NAMED_EVENT, GANG_MEMBER_REPORT_EVENT, type GangMemberReportEvent } from "./events.ts";
+import { summarizeResultText } from "../compact-result.ts";
 
 const execFileP = promisify(execFile);
 
@@ -51,6 +52,48 @@ const COMMAND_COMPLETIONS: AutocompleteItem[] = [
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 type GangToolDetails = Member | { name: string } | { error: true } | undefined;
 type ToolResult = AgentToolResult<GangToolDetails>;
+
+function expandHint(): string {
+  try {
+    return keyHint("app.tools.expand", "expand");
+  } catch {
+    return "Ctrl+O to expand";
+  }
+}
+
+function gangResultText(result: AgentToolResult<unknown>): string {
+  const content = result.content.find((part) => part.type === "text");
+  return content?.type === "text" ? content.text.trim() || "Done" : "Done";
+}
+
+function gangResultFailed(result: AgentToolResult<unknown>, isError: boolean): boolean {
+  if (isError) return true;
+  return (result.details as { error?: unknown } | undefined)?.error === true;
+}
+
+function gangResultColor(failed: boolean, expanded: boolean): "error" | "toolOutput" | "success" {
+  if (failed) return "error";
+  return expanded ? "toolOutput" : "success";
+}
+
+function gangExpandHint(hidden: boolean, theme: Theme): string {
+  if (!hidden) return "";
+  return ` ${theme.fg("dim", `(${expandHint()})`)}`;
+}
+
+export function renderGangResult(
+  result: AgentToolResult<unknown>,
+  { expanded, isPartial }: ToolRenderResultOptions,
+  theme: Theme,
+  isError: boolean,
+): Text {
+  if (isPartial) return new Text(theme.fg("warning", "Gang working…"), 0, 0);
+  const fullText = gangResultText(result);
+  const failed = gangResultFailed(result, isError);
+  const displayed = summarizeResultText(fullText, expanded);
+  const color = gangResultColor(failed, expanded);
+  return new Text(theme.fg(color, displayed.text) + gangExpandHint(displayed.hidden, theme), 0, 0);
+}
 
 type SpawnCommandParseResult =
   | { ok: true; name?: string; task: string; thinkingLevel?: string }
@@ -493,6 +536,9 @@ Only "task" is required for spawn. spawn returns immediately. The member runs it
       force: Type.Optional(Type.Boolean({ description: "When action='clean', also kill members that already reported back." })),
       finished: Type.Optional(Type.Boolean({ description: "When action='stop', stop all reapable members instead of one named role." })),
     }),
+    renderResult(result, options, theme, context) {
+      return renderGangResult(result, options, theme, context.isError);
+    },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<ToolResult> {
       const action = params.action;
       if (action === "spawn") {
