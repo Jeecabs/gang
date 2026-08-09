@@ -11,11 +11,11 @@ Read every assigned captured `*.patch` file. It is the source of truth. Do not r
 
 Read full file context when needed. Use the source object from the assignment. A `/dev/null` patch marker means that side has no file state. Do not fetch an absent side.
 
-For a local source:
+For a local source, use the assigned path for after-state. For a rename or copy, derive and decode the old-side path from `rename from`, `copy from`, or the `---` header. Use that old path for old-state. Pass each complete `<revision>:<path>` value as one shell-quoted argument.
 
-- Worktree after-state: read the local file. Old state: `git show HEAD:<path>`. Paths in `source.untrackedFiles` have no old state.
-- Base after-state: `git show <head-sha>:<path>`. Old state: `git show <merge-base-sha>:<path>`.
-- Commit after-state: `git show <commit-sha>:<path>`. Old state: `git show <parent-sha>:<path>`, using `source.parentSha`. A null parent means a root commit with no old state.
+- Worktree after-state: read the local file. Old state: `git show "HEAD:<old-path>"`. Paths in `source.untrackedFiles` have no old state.
+- Base after-state: `git show "<head-sha>:<path>"`. Old state: `git show "<merge-base-sha>:<old-path>"`.
+- Commit after-state: `git show "<commit-sha>:<path>"`. Old state: `git show "<parent-sha>:<old-path>"`, using `source.parentSha`. A null parent means a root commit with no old state.
 
 For a PR source:
 

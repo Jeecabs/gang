@@ -237,6 +237,8 @@ export default function gangExtension(pi: ExtensionAPI) {
   const roster = new Roster();
   const memberDeadlines = new MemberDeadlineTimers();
   let orchestratorName = ORCHESTRATOR;
+  let sessionGeneration = 0;
+  let sessionActive = false;
   // When pi itself runs inside tmux (and exposes its pane via $TMUX_PANE), members split into pi's own
   // window — visible alongside pi; otherwise they go to a dedicated detached `gang` session you attach
   // to. Gate on TMUX_PANE so we always have a concrete pane to target (a no-`-t` split lands in whatever
@@ -397,20 +399,28 @@ export default function gangExtension(pi: ExtensionAPI) {
 
   function scheduleMemberDeadline(member: Member): void {
     if (member.deadlineAt === undefined) return;
+    const generation = sessionGeneration;
     memberDeadlines.schedule(member.role, member.deadlineAt, () => {
-      void notifyMemberDeadline(member).catch((error) => {
-        pi.appendEntry("gang_deadline_delivery_error", { role: member.role, error: getErrorMessage(error) });
+      void notifyMemberDeadline(member, generation).catch((error) => {
+        if (!sessionActive || generation !== sessionGeneration) return;
+        try {
+          pi.appendEntry("gang_deadline_delivery_error", { role: member.role, error: getErrorMessage(error) });
+        } catch {
+          // Session disposal can race error reporting. Never surface a second asynchronous failure.
+        }
       });
     });
   }
 
-  async function notifyMemberDeadline(expected: Member): Promise<void> {
+  async function notifyMemberDeadline(expected: Member, generation: number): Promise<void> {
+    if (!sessionActive || generation !== sessionGeneration) return;
     const member = roster.findByRole(expected.role);
     if (member !== expected || member.reportedDoneAt !== undefined) return;
     const loaded = await loadMemberSnapshots().catch((error) => ({
       snapshots: [] as MemberRuntimeSnapshot[],
       warning: `Couldn't inspect tmux panes (${getErrorMessage(error)})`,
     }));
+    if (!sessionActive || generation !== sessionGeneration) return;
     const current = roster.findByRole(expected.role);
     if (current !== expected || current.reportedDoneAt !== undefined) return;
     const snapshot = loaded.snapshots.find((candidate) => candidate.member === expected);
@@ -570,6 +580,8 @@ export default function gangExtension(pi: ExtensionAPI) {
   // spawn (see spawnMember), so sessions that never use gang keep their natural resume title.
   // A child already has its --name role as its session name, so existingName keeps that.
   pi.on("session_start", (_event, ctx: ExtensionContext) => {
+    sessionGeneration += 1;
+    sessionActive = true;
     const existingName = pi.getSessionName()?.trim();
     orchestratorName = existingName || defaultSuperintendentName(ctx.cwd ?? process.cwd());
   });
@@ -584,6 +596,8 @@ export default function gangExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", () => {
+    sessionActive = false;
+    sessionGeneration += 1;
     memberDeadlines.clearAll();
   });
 

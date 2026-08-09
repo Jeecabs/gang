@@ -433,6 +433,42 @@ test("send with done ends a subagent session but never a top-level one", { concu
   }
 });
 
+test("consumed final replies still emit terminal gang reports", { concurrency: false }, async () => {
+  const { default: piIntercomExtension } = await import("./index.ts");
+  const { orchestrator, cleanup } = await setupClients();
+  const harness = createExtensionHarness("review-supervisor");
+  const reports: unknown[] = [];
+
+  try {
+    harness.pi.events.on("gang:member-report", (payload) => reports.push(payload));
+    piIntercomExtension(harness.pi as never);
+    await harness.emitLifecycle("session_start");
+    const intercomTool = getRegisteredTool(harness, "intercom");
+
+    const received = once(orchestrator, "message") as Promise<[SessionInfo, Message]>;
+    const resultPromise = intercomTool.execute("ask-final", {
+      action: "ask", to: "orchestrator", message: "Return the final review.",
+    }, new AbortController().signal, undefined, harness.ctx);
+    const [from, ask] = await received;
+    const sent = await orchestrator.send(from.id, {
+      text: "Final review complete.",
+      replyTo: ask.id,
+      subagent: { runId: "review-run", agent: "worker", index: "0", final: true },
+    });
+    assert.equal(sent.delivered, true);
+
+    const result = await resultPromise;
+    assert.match(result.content[0]?.text ?? "", /Final review complete/);
+    assert.equal(reports.length, 1);
+    assert.deepEqual((reports[0] as { subagent?: unknown }).subagent, {
+      runId: "review-run", agent: "worker", index: "0", final: true,
+    });
+  } finally {
+    await harness.emitLifecycle("session_shutdown");
+    await cleanup();
+  }
+});
+
 test("contact supervisor tool renders reason and reply state", async () => {
   const { default: piIntercomExtension } = await import("./index.ts");
 

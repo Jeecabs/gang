@@ -16,11 +16,14 @@ If the user did not identify a target, ask them to choose: worktree, base branch
 Resolve `scripts/prepare-review.mjs` relative to this `SKILL.md`. Run exactly one command from the target repository:
 
 ```sh
-node <skill-dir>/scripts/prepare-review.mjs worktree
-node <skill-dir>/scripts/prepare-review.mjs base <branch-or-ref>
-node <skill-dir>/scripts/prepare-review.mjs commit <commit>
-node <skill-dir>/scripts/prepare-review.mjs pr [number-or-url-or-branch]
+node "<skill-dir>/scripts/prepare-review.mjs" worktree
+node "<skill-dir>/scripts/prepare-review.mjs" base "<branch-or-ref>"
+node "<skill-dir>/scripts/prepare-review.mjs" commit "<commit>"
+node "<skill-dir>/scripts/prepare-review.mjs" pr
+node "<skill-dir>/scripts/prepare-review.mjs" pr "<number-or-url-or-branch>"
 ```
+
+Pass every script path, ref, PR target, and cleanup path as a separate shell-quoted argument. Never concatenate a dynamic value into shell code.
 
 The script stores each reviewable patch in a private temporary directory. It filters noise, pins committed refs, and prints a JSON plan. If `files` is empty, report that and stop. Keep `cleanupPath` until aggregation finishes.
 
@@ -60,7 +63,7 @@ Validate the full report before counting it as complete:
 
 - The value must be one JSON object. The intercom sender, nonempty `reviewer`, and expected role must match.
 - `files_reviewed` must be an array of strings equal to the assigned-path set, with no missing, extra, or duplicate paths.
-- `findings` must be an array. Every finding must contain nonempty string values for `title`, `body`, `suggested_fix`, and `file_path`.
+- `findings` must be an array. Every finding must contain nonempty string values for `title`, `body`, `suggested_fix`, and `file_path`. A title must contain at most 80 characters.
 - Every finding needs a `priority` in `P0|P1|P2|P3`, finite numeric `confidence` in `[0,1]`, and positive integer `line_start` and `line_end`. Require `line_start <= line_end` and at most 10 inclusive lines.
 - `overall_correctness` must be `correct` or `incorrect`. Require a nonempty string `explanation` and finite numeric `confidence` in `[0,1]`.
 
@@ -87,6 +90,6 @@ Apply verdict precedence exactly:
 
 An `INCOMPLETE` result must still display any validated blocker received before coverage failed. If no qualifying findings exist, say `No qualifying findings.` Include a brief 1-3 sentence verdict explanation.
 
-After all reports arrive, stop each expected reviewer by role. If the user ends early, stop each outstanding review role before cleanup. Never bulk-stop unrelated members.
+On every terminal path, stop each expected reviewer by role, including roles that already reported. Do this after all reports arrive or when the user ends early. Never bulk-stop unrelated members.
 
-Finally, run `node <skill-dir>/scripts/prepare-review.mjs cleanup <cleanupPath>` with the exact path from the plan.
+Finally, run `node "<skill-dir>/scripts/prepare-review.mjs" cleanup "<cleanupPath>"` with the exact path from the plan. Keep both dynamic values shell-quoted and separate.
