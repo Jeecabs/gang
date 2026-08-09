@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { getAskTimeoutMs } from "./config.ts";
 import { ReplyTracker } from "./reply-tracker.ts";
 import type { Message, SessionInfo } from "./types.ts";
 
@@ -49,8 +50,56 @@ test("reply with to resolves matching pending ask", () => {
   tracker.recordIncomingMessage(createSession("planner-id", "planner"), createMessage("ask-1", "First"), 1000);
   tracker.recordIncomingMessage(createSession("reviewer-id", "reviewer"), createMessage("ask-2", "Second"), 1001);
 
-  assert.equal(tracker.resolveReplyTarget({ to: "reviewer" }, 1002).message.id, "ask-2");
+  assert.equal(tracker.resolveReplyTarget({ to: "ReViEwEr" }, 1002).message.id, "ask-2");
   assert.equal(tracker.resolveReplyTarget({ to: "planner-id" }, 1002).message.id, "ask-1");
+});
+
+test("reply with to resolves a pending ask by a unique short session ID", () => {
+  const tracker = new ReplyTracker();
+  tracker.recordIncomingMessage(createSession("019fd3c4-1111-7222-8333-444444444444", "planner"), createMessage("ask-1", "First"), 1000);
+  tracker.recordIncomingMessage(createSession("019fd3d5-1111-7222-8333-444444444444", "reviewer"), createMessage("ask-2", "Second"), 1001);
+
+  assert.equal(tracker.resolveReplyTarget({ to: "019fd3c4" }, 1002).message.id, "ask-1");
+  assert.equal(tracker.resolveReplyTarget({ to: "019fd3c4", replyTo: "ask-1" }, 1002).message.id, "ask-1");
+});
+
+test("reply with to prefers an exact sender name over another sender ID prefix", () => {
+  const tracker = new ReplyTracker();
+  tracker.recordIncomingMessage(createSession("planner-session-id", "019fd3c4"), createMessage("ask-1", "Named sender"), 1000);
+  tracker.recordIncomingMessage(createSession("019fd3c4-1111-7222-8333-444444444444", "reviewer"), createMessage("ask-2", "Prefixed sender"), 1001);
+
+  assert.equal(tracker.resolveReplyTarget({ to: "019fd3c4" }, 1002).message.id, "ask-1");
+});
+
+test("reply with to clearly rejects an ambiguous session ID prefix", () => {
+  const tracker = new ReplyTracker();
+  tracker.recordIncomingMessage(createSession("019fd3c4-1111-7222-8333-444444444444", "planner"), createMessage("ask-1", "First"), 1000);
+  tracker.recordIncomingMessage(createSession("019fd3c4-5555-7666-8777-888888888888", "reviewer"), createMessage("ask-2", "Second"), 1001);
+
+  assert.throws(
+    () => tracker.resolveReplyTarget({ to: "019fd3c4" }, 1002),
+    /Multiple pending asks match ID prefix "019fd3c4" — use a longer session ID prefix or specify `replyTo`/,
+  );
+});
+
+test("explicit to overrides the current turn context", () => {
+  const tracker = new ReplyTracker();
+  const current = tracker.recordIncomingMessage(createSession("planner-id", "planner"), createMessage("ask-1", "First"), 1000);
+  tracker.recordIncomingMessage(createSession("reviewer-id", "reviewer"), createMessage("ask-2", "Second"), 1001);
+  tracker.queueTurnContext(current);
+  tracker.beginTurn(1002);
+
+  assert.equal(tracker.resolveReplyTarget({ to: "reviewer" }, 1003).message.id, "ask-2");
+  assert.throws(() => tracker.resolveReplyTarget({ to: "missing" }, 1003), /No pending ask from/);
+});
+
+test("replyTo resolves the exact pending ask", () => {
+  const tracker = new ReplyTracker();
+  tracker.recordIncomingMessage(createSession("planner-id", "planner"), createMessage("ask-1", "First"), 1000);
+  tracker.recordIncomingMessage(createSession("reviewer-id", "reviewer"), createMessage("ask-2", "Second"), 1001);
+
+  assert.equal(tracker.resolveReplyTarget({ replyTo: "ask-2" }, 1002).from.id, "reviewer-id");
+  assert.throws(() => tracker.resolveReplyTarget({ to: "planner", replyTo: "ask-2" }, 1002), /is not from/);
 });
 
 test("reply errors when no context and no pending asks", () => {
@@ -74,4 +123,97 @@ test("reply removes pending ask after successful reply", () => {
   tracker.markReplied("ask-1");
 
   assert.deepEqual(tracker.listPending(1001), []);
+});
+
+test("ask timeout can be configured from environment", () => {
+  const previous = process.env.PI_INTERCOM_ASK_TIMEOUT_MS;
+  process.env.PI_INTERCOM_ASK_TIMEOUT_MS = "42";
+  try {
+    assert.equal(getAskTimeoutMs(), 42);
+    assert.throws(() => {
+      process.env.PI_INTERCOM_ASK_TIMEOUT_MS = "0";
+      getAskTimeoutMs();
+    }, /positive integer/);
+  } finally {
+    if (previous === undefined) delete process.env.PI_INTERCOM_ASK_TIMEOUT_MS;
+    else process.env.PI_INTERCOM_ASK_TIMEOUT_MS = previous;
+  }
+});
+
+test("pending asks can be explicitly dismissed without removing retryable failures", () => {
+  const tracker = new ReplyTracker();
+  tracker.recordIncomingMessage(createSession("planner-id", "planner"), createMessage("ask-1", "Need a decision"), 1000);
+  tracker.recordIncomingMessage(createSession("reviewer-id", "reviewer"), createMessage("ask-2", "Retryable"), 1001);
+
+  tracker.dismissPendingAsk("ask-1");
+
+  assert.deepEqual(tracker.listPending(1002).map((context) => context.message.id), ["ask-2"]);
+});
+
+test("dismissing a pending ask removes queued turn context", () => {
+  const tracker = new ReplyTracker();
+  const context = tracker.recordIncomingMessage(createSession("planner-id", "planner"), createMessage("ask-1", "Need a decision"), 1000);
+  tracker.queueTurnContext(context);
+
+  tracker.dismissPendingAsk("ask-1");
+  tracker.beginTurn(1001);
+
+  assert.throws(() => tracker.resolveReplyTarget({}, 1002), /No active intercom context to reply to/);
+});
+
+test("findUniquePendingAskFrom returns the sole match by exact sender ID", () => {
+  const tracker = new ReplyTracker();
+  tracker.recordIncomingMessage(createSession("planner-id", "planner"), createMessage("ask-1", "Need a decision"), 1000);
+
+  const context = tracker.findUniquePendingAskFrom("planner-id", 1001);
+
+  assert.equal(context?.message.id, "ask-1");
+});
+
+test("findUniquePendingAskFrom returns the sole match by case-insensitive name", () => {
+  const tracker = new ReplyTracker();
+  tracker.recordIncomingMessage(createSession("planner-id", "Planner"), createMessage("ask-1", "Need a decision"), 1000);
+
+  const context = tracker.findUniquePendingAskFrom("PLANNER", 1001);
+
+  assert.equal(context?.message.id, "ask-1");
+});
+
+test("findUniquePendingAskFrom does not resolve an ID prefix", () => {
+  const tracker = new ReplyTracker();
+  tracker.recordIncomingMessage(createSession("abcdef-session-id", "planner"), createMessage("ask-1", "Need a decision"), 1000);
+
+  assert.equal(tracker.findUniquePendingAskFrom("abcdef", 1001), null);
+});
+
+test("findUniquePendingAskFrom returns null when there is no match", () => {
+  const tracker = new ReplyTracker();
+  tracker.recordIncomingMessage(createSession("planner-id", "planner"), createMessage("ask-1", "Need a decision"), 1000);
+
+  assert.equal(tracker.findUniquePendingAskFrom("reviewer-id", 1001), null);
+});
+
+test("findUniquePendingAskFrom returns null when the sole match has expired", () => {
+  const tracker = new ReplyTracker();
+  tracker.recordIncomingMessage(createSession("planner-id", "planner"), createMessage("ask-1", "Need a decision"), 1000);
+
+  const expiredAt = 1000 + getAskTimeoutMs() + 1;
+  assert.equal(tracker.findUniquePendingAskFrom("planner-id", expiredAt), null);
+});
+
+test("findUniquePendingAskFrom returns null when multiple asks match", () => {
+  const tracker = new ReplyTracker();
+  tracker.recordIncomingMessage(createSession("planner-id", "planner"), createMessage("ask-1", "First"), 1000);
+  tracker.recordIncomingMessage(createSession("planner-id", "planner"), createMessage("ask-2", "Second"), 1001);
+
+  assert.equal(tracker.findUniquePendingAskFrom("planner-id", 1002), null);
+});
+
+test("findUniquePendingAskFrom does not mutate tracker state", () => {
+  const tracker = new ReplyTracker();
+  tracker.recordIncomingMessage(createSession("planner-id", "planner"), createMessage("ask-1", "Need a decision"), 1000);
+
+  tracker.findUniquePendingAskFrom("planner-id", 1001);
+
+  assert.deepEqual(tracker.listPending(1002).map((context) => context.message.id), ["ask-1"]);
 });
