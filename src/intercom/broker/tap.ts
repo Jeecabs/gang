@@ -1,6 +1,6 @@
 import { appendFileSync, chmodSync, mkdirSync } from "fs";
 import { dirname, join } from "path";
-import { homedir } from "os";
+import { getIntercomDirPath } from "./paths.ts";
 
 /** One durable record per routed cross-agent message. */
 export interface RoutedLogEntry {
@@ -11,10 +11,18 @@ export interface RoutedLogEntry {
   text: string;
   replyTo?: string;
   expectsReply?: boolean;
+  supersedes?: string;
+  retryOf?: string;
+  subagent?: {
+    runId: string;
+    agent: string;
+    index: string;
+    final: boolean;
+  };
 }
 
-export function getIntercomLogPath(homeDir: string = homedir()): string {
-  return join(homeDir, ".pi/agent/intercom/intercom.jsonl");
+export function getIntercomLogPath(intercomDir: string = getIntercomDirPath()): string {
+  return join(intercomDir, "intercom.jsonl");
 }
 
 /** Append one greppable, replayable JSONL line. Best-effort: never break routing. */

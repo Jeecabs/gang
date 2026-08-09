@@ -10,8 +10,9 @@ bus**, and observe everything three ways: live panes, a durable log, and a missi
 in your terminal (a Pi overlay) **and** in the browser.
 
 Built on a vendored, fully-owned copy of [pi-intercom](https://github.com/nicobailon/pi-intercom)
-(MIT). No external `pi-intercom` runtime dependency; npm deps install with the package.
-Targets `@earendil-works` Pi **0.80.x** (supported range: `>=0.80.2 <0.81.0`).
+**v0.9.3** (MIT). No external `pi-intercom` runtime dependency; npm deps install with the package.
+A dev-only version pin lets Dependabot flag new Intercom releases, while CI requires the vendored
+version marker to match. Targets `@earendil-works` Pi **0.84.x** (`>=0.84.1 <0.85.0`).
 
 ```
 ┌─ tmux panes ──────────────┐   raw per-agent view — watch each member's pi session
@@ -29,7 +30,7 @@ Targets `@earendil-works` Pi **0.80.x** (supported range: `>=0.80.2 <0.81.0`).
 
 ## Requirements
 
-- **Pi** (`@earendil-works/pi-coding-agent`) 0.80.x, ≥ 0.80.2 — `pi --version`
+- **Pi** (`@earendil-works/pi-coding-agent`) 0.84.x, ≥ 0.84.1 — `pi --version`
 - **tmux** — members run as visible panes (`brew install tmux`)
 - **Node** ≥ 22
 
@@ -114,7 +115,7 @@ tail -f ~/.pi/agent/intercom/intercom.jsonl
 | `/gang url` | show the browser mission-control URL (`http://127.0.0.1:<GANG_GUI_PORT>`) |
 | `/gang name [name]` | show or set this agent/session's own name |
 | `/gang watch` · `alt+g` | open mission control (in-Pi overlay) |
-| `intercom` tool | message any session: `list` / `send` / `ask` / `reply` |
+| `intercom` tool | `list` / `list-cwd` / `send` / `ask` / `reply` / `pending` / `status` / `cancel` |
 
 Env knobs: `GANG_GUI_PORT` (default `7717`), `GANG_TMUX_BIN` (default Homebrew tmux), `GANG_FEED_HOURS` (mission-control feed recency window, default `6`).
 
@@ -148,9 +149,9 @@ findings before it gives the verdict.
 
 `package.json` → `pi.extensions` points Pi at two TypeScript entry files it loads on startup:
 
-- `src/intercom/` — vendored pi-intercom: the broker, client, and the `intercom` /
-  `contact_supervisor` tools. **Owned** — imports retargeted to `@earendil-works/*`, plus a broker
-  message **tap** (durable log) and an embedded **HTTP/SSE** mission-control server.
+- `src/intercom/` — vendored pi-intercom: broker, client, extension bus, mailbox, and the
+  `intercom` / `contact_supervisor` tools. **Owned** — adds gang lifecycle metadata, a broker message
+  **tap** (durable log), compact tool results, and an embedded **HTTP/SSE** mission-control server.
 - `src/gang/` — the `gang` tool (spawn members in tmux, list the roster), the `/gang watch`
   overlay, superintendent auto-naming, and the `gang-review` skill.
 
