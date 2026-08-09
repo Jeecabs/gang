@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getGangArgumentCompletions, parseSpawnCommand } from "./index.ts";
+import { getGangArgumentCompletions, isDeadlineSeconds, parseSpawnCommand } from "./index.ts";
 
 test("gang command completes subcommands", () => {
   assert.deepEqual(getGangArgumentCompletions("wa"), [
@@ -65,6 +65,11 @@ test("parseSpawnCommand: a non-leading @ stays inside the task", () => {
     assert.equal(r.name, undefined);
     assert.equal(r.task, "ping @alice about the bug");
   }
+});
+
+test("gang tool deadline accepts bounded integer seconds", () => {
+  for (const value of [1, 600, 86_400]) assert.equal(isDeadlineSeconds(value), true);
+  for (const value of [0, 1.5, 86_401, "600", undefined]) assert.equal(isDeadlineSeconds(value), false);
 });
 
 test("parseSpawnCommand rejects invalid thinking", () => {

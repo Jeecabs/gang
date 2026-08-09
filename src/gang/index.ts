@@ -7,7 +7,7 @@ import { chmodSync, mkdirSync, writeFileSync } from "fs";
 import { basename, join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
-import { ORCHESTRATOR, Roster, buildMemberEnv, computeMemberRuntimeSnapshot, isValidRole, type Member, type MemberRuntimeSnapshot } from "./members.ts";
+import { MemberDeadlineTimers, ORCHESTRATOR, Roster, buildMemberEnv, computeMemberRuntimeSnapshot, isValidRole, type Member, type MemberRuntimeSnapshot } from "./members.ts";
 import {
   GANG_SESSION,
   TMUX_BIN,
@@ -50,8 +50,12 @@ const COMMAND_COMPLETIONS: AutocompleteItem[] = [
 ];
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+const MAX_DEADLINE_SECONDS = 24 * 60 * 60;
 type GangToolDetails = Member | { name: string } | { error: true } | undefined;
 type ToolResult = AgentToolResult<GangToolDetails>;
+type SpawnToolParams = { task?: unknown; role?: unknown; thinking?: unknown; deadlineSeconds?: unknown };
+type StopToolParams = { role?: unknown; finished?: unknown };
+type NameToolParams = { name?: unknown };
 
 function expandHint(): string {
   try {
@@ -101,6 +105,10 @@ type SpawnCommandParseResult =
 
 function isThinkingLevel(value: string): boolean {
   return THINKING_LEVELS.includes(value as (typeof THINKING_LEVELS)[number]);
+}
+
+export function isDeadlineSeconds(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= MAX_DEADLINE_SECONDS;
 }
 
 export function parseSpawnCommand(rest: string): SpawnCommandParseResult {
@@ -227,6 +235,7 @@ function defaultSuperintendentName(cwd = process.cwd()): string {
 
 export default function gangExtension(pi: ExtensionAPI) {
   const roster = new Roster();
+  const memberDeadlines = new MemberDeadlineTimers();
   let orchestratorName = ORCHESTRATOR;
   // When pi itself runs inside tmux (and exposes its pane via $TMUX_PANE), members split into pi's own
   // window — visible alongside pi; otherwise they go to a dedicated detached `gang` session you attach
@@ -258,13 +267,20 @@ export default function gangExtension(pi: ExtensionAPI) {
     return file;
   }
 
-  async function spawnMember(task: string, cwd: string, opts: { name?: string; thinkingLevel?: string } = {}): Promise<Member> {
-    const { name, thinkingLevel } = opts;
+  async function spawnMember(
+    task: string,
+    cwd: string,
+    opts: { name?: string; thinkingLevel?: string; deadlineSeconds?: number } = {},
+  ): Promise<Member> {
+    const { name, thinkingLevel, deadlineSeconds } = opts;
     if (name !== undefined && !isValidRole(name)) {
       throw new Error(`Invalid name "${name}". Use letters, digits, _ or - (start with a letter, max 32 chars).`);
     }
     if (thinkingLevel && !isThinkingLevel(thinkingLevel)) {
       throw new Error(`Invalid thinking level "${thinkingLevel}". Use off, minimal, low, medium, high, or xhigh.`);
+    }
+    if (deadlineSeconds !== undefined && !isDeadlineSeconds(deadlineSeconds)) {
+      throw new Error(`Invalid deadlineSeconds "${deadlineSeconds}". Use an integer from 1 to ${MAX_DEADLINE_SECONDS}.`);
     }
     // Claim the superintendent identity lazily — first spawn is when we actually need to be addressable. Push
     // it onto the bus now so this member can reach us by name without waiting for our next turn.
@@ -293,8 +309,19 @@ export default function gangExtension(pi: ExtensionAPI) {
       if (inTmux) throw new Error(`tmux couldn't add a pane (${getErrorMessage(error)}) — your tmux window may be full. Close a pane or run \`/gang clean\`, then retry.`);
       throw error;
     }
-    const member: Member = { role, task, index, paneId, runId: roster.runId, spawnedAt: Date.now(), thinkingLevel };
+    const spawnedAt = Date.now();
+    const member: Member = {
+      role,
+      task,
+      index,
+      paneId,
+      runId: roster.runId,
+      spawnedAt,
+      thinkingLevel,
+      deadlineAt: deadlineSeconds === undefined ? undefined : spawnedAt + deadlineSeconds * 1000,
+    };
     roster.add(member);
+    scheduleMemberDeadline(member);
     // Best-effort polish; failures here must not lose the (already-tracked) member.
     await runTmux(remainOnExitArgs(paneId)).catch(() => {});
     if (inTmux) {
@@ -360,6 +387,43 @@ export default function gangExtension(pi: ExtensionAPI) {
     };
   }
 
+  function clearMemberDeadline(role: string): void {
+    memberDeadlines.clear(role);
+  }
+
+  function clearMemberDeadlines(roles: Iterable<string>): void {
+    memberDeadlines.clearMany(roles);
+  }
+
+  function scheduleMemberDeadline(member: Member): void {
+    if (member.deadlineAt === undefined) return;
+    memberDeadlines.schedule(member.role, member.deadlineAt, () => {
+      void notifyMemberDeadline(member).catch((error) => {
+        pi.appendEntry("gang_deadline_delivery_error", { role: member.role, error: getErrorMessage(error) });
+      });
+    });
+  }
+
+  async function notifyMemberDeadline(expected: Member): Promise<void> {
+    const member = roster.findByRole(expected.role);
+    if (member !== expected || member.reportedDoneAt !== undefined) return;
+    const loaded = await loadMemberSnapshots().catch((error) => ({
+      snapshots: [] as MemberRuntimeSnapshot[],
+      warning: `Couldn't inspect tmux panes (${getErrorMessage(error)})`,
+    }));
+    const current = roster.findByRole(expected.role);
+    if (current !== expected || current.reportedDoneAt !== undefined) return;
+    const snapshot = loaded.snapshots.find((candidate) => candidate.member === expected);
+    const state = snapshot?.state ?? "pane_missing";
+    const content = [
+      `**⏱ Gang member deadline reached: ${expected.role}**`,
+      `The member did not report before its deadline. Current state: ${state}.`,
+      loaded.warning ? `Diagnostic: ${loaded.warning}.` : "",
+      `Treat this bounded task as incomplete. Stop \"${expected.role}\" and clean task artifacts unless the user explicitly extends it.`,
+    ].filter(Boolean).join("\n\n");
+    pi.sendUserMessage(content, { deliverAs: "followUp" });
+  }
+
   async function killExistingPanes(snapshots: MemberRuntimeSnapshot[]): Promise<number> {
     let killed = 0;
     const seen = new Set<string>();
@@ -375,6 +439,7 @@ export default function gangExtension(pi: ExtensionAPI) {
   async function stopMember(role: string): Promise<string> {
     const known = roster.findByRole(role);
     if (!known) return `No gang member named "${role}".`;
+    clearMemberDeadline(role);
     const { snapshots, warning } = await loadMemberSnapshots();
     const target = snapshots.find((snapshot) => snapshot.member.role === role) ?? computeMemberRuntimeSnapshot(known);
     const killed = await killExistingPanes([target]);
@@ -397,7 +462,9 @@ export default function gangExtension(pi: ExtensionAPI) {
       return `${warning ? `${warning}. ` : ""}No finished members to stop — ${count(snapshots.length, "member")} still running.`;
     }
     const killed = await killExistingPanes(finished);
-    const removed = roster.removeByRoles(new Set(finished.map((snapshot) => snapshot.member.role)));
+    const finishedRoles = new Set(finished.map((snapshot) => snapshot.member.role));
+    clearMemberDeadlines(finishedRoles);
+    const removed = roster.removeByRoles(finishedRoles);
     const reported = finished.filter((snapshot) => snapshot.state === "reported_done").length;
     const dead = finished.filter((snapshot) => snapshot.state === "pane_dead").length;
     const missing = finished.filter((snapshot) => snapshot.state === "pane_missing").length;
@@ -419,6 +486,7 @@ export default function gangExtension(pi: ExtensionAPI) {
       if (inTmux) await killExistingPanes(snapshots);
       else if (warning !== "No gang session") await runTmux(killSessionArgs()).catch(() => {});
       const stopped = roster.list().length;
+      clearMemberDeadlines(roster.list().map((member) => member.role));
       roster.clear();
       return `${warning && warning !== "No gang session" ? `${warning}. ` : ""}Stopped the gang: cleared ${count(stopped, "member")}.`;
     }
@@ -429,14 +497,18 @@ export default function gangExtension(pi: ExtensionAPI) {
         return `${warning ? `${warning}. ` : ""}Nothing to force-clean — ${count(snapshots.length, "member")} still running.`;
       }
       const killed = await killExistingPanes(forceTargets);
-      const removed = roster.removeByRoles(new Set(forceTargets.map((snapshot) => snapshot.member.role)));
+      const forceRoles = new Set(forceTargets.map((snapshot) => snapshot.member.role));
+      clearMemberDeadlines(forceRoles);
+      const removed = roster.removeByRoles(forceRoles);
       return `${warning ? `${warning}. ` : ""}Force-cleaned ${count(removed, "member")}: killed ${count(killed, "pane")}. ${count(roster.list().length, "member")} still running.`;
     }
 
     const dead = snapshots.filter((snapshot) => snapshot.state === "pane_dead");
     const missing = snapshots.filter((snapshot) => snapshot.state === "pane_missing");
     const killed = await killExistingPanes(dead);
-    const removed = roster.removeByRoles(new Set([...dead, ...missing].map((snapshot) => snapshot.member.role)));
+    const staleRoles = new Set([...dead, ...missing].map((snapshot) => snapshot.member.role));
+    clearMemberDeadlines(staleRoles);
+    const removed = roster.removeByRoles(staleRoles);
     const running = roster.list().length;
     if (dead.length === 0 && missing.length === 0) {
       return `${warning ? `${warning}. ` : ""}Nothing to reap — ${count(running, "member")} still running.`;
@@ -459,10 +531,11 @@ export default function gangExtension(pi: ExtensionAPI) {
       const m = snapshot.member;
       const preview = m.task.replace(/\s+/g, " ").slice(0, 60);
       const thinking = m.thinkingLevel ? ` — thinking ${m.thinkingLevel}` : "";
+      const deadline = m.deadlineAt ? ` — deadline in ${Math.max(0, Math.ceil((m.deadlineAt - Date.now()) / 60_000))}m` : "";
       const command = snapshot.currentCommand ? ` — cmd ${snapshot.currentCommand}` : "";
       const reported = m.reportedDoneAt ? ` — reported ${relativeAge(m.reportedDoneAt)}` : " — reported no";
       const lastReport = m.lastReportText ? ` — last: ${m.lastReportText.replace(/\s+/g, " ").slice(0, 40)}` : "";
-      return `• ${m.role} — pane ${m.paneId}${thinking} — ${snapshot.state} — exists ${snapshot.paneExists ? "yes" : "no"} — alive ${snapshot.processAlive ? "yes" : "no"}${command}${reported} — reapable ${snapshot.reapable ? "yes" : "no"}${lastReport} — ${preview}`;
+      return `• ${m.role} — pane ${m.paneId}${thinking}${deadline} — ${snapshot.state} — exists ${snapshot.paneExists ? "yes" : "no"} — alive ${snapshot.processAlive ? "yes" : "no"}${command}${reported} — reapable ${snapshot.reapable ? "yes" : "no"}${lastReport} — ${preview}`;
     });
     const diagnostic = warning ? `\ntmux: ${warning}` : "";
     return `Gang members (run ${roster.runId.slice(0, 8)}). ${watch}${diagnostic}\n${rows.join("\n")}`;
@@ -470,9 +543,10 @@ export default function gangExtension(pi: ExtensionAPI) {
 
   function spawnedMessage(m: Member): string {
     const thinking = m.thinkingLevel ? ` with ${m.thinkingLevel} thinking` : "";
+    const deadline = m.deadlineAt ? ` Deadline: ${Math.max(1, Math.ceil((m.deadlineAt - Date.now()) / 1000))}s.` : "";
     const where = inTmux ? "split into your current window" : `session: ${GANG_SESSION}`;
     return [
-      `Launched member "${m.role}"${thinking} in tmux pane ${m.paneId} (${where}).`,
+      `Launched member "${m.role}"${thinking} in tmux pane ${m.paneId} (${where}).${deadline}`,
       watchHint(),
       `Its result will arrive here as an intercom message from "${m.role}" — keep working; don't block on it.`,
     ].join("\n");
@@ -502,10 +576,54 @@ export default function gangExtension(pi: ExtensionAPI) {
 
   pi.events.on(GANG_MEMBER_REPORT_EVENT, (payload) => {
     const report = payload as GangMemberReportEvent | undefined;
-    const sender = report?.fromName?.trim() || report?.fromId?.trim() || "";
-    if (!sender || report?.expectsReply) return;
-    roster.markReportedDone(sender, report?.timestamp, report?.text);
+    const identity = report?.subagent;
+    if (!report || report.expectsReply || identity?.final !== true) return;
+    const member = roster.findByChildIdentity(identity.runId, identity.agent, identity.index);
+    if (!member) return;
+    if (roster.markReportedDone(member.role, report.timestamp, report.text)) clearMemberDeadline(member.role);
   });
+
+  pi.on("session_shutdown", () => {
+    memberDeadlines.clearAll();
+  });
+
+  async function executeSpawn(params: SpawnToolParams, cwd: string): Promise<ToolResult> {
+    if (typeof params.task !== "string" || !params.task) {
+      return { content: [{ type: "text", text: "spawn requires 'task'." }], details: { error: true } };
+    }
+    const name = typeof params.role === "string" && params.role.trim() ? params.role.trim() : undefined;
+    const thinkingLevel = typeof params.thinking === "string" ? params.thinking : undefined;
+    const deadlineSeconds = typeof params.deadlineSeconds === "number" ? params.deadlineSeconds : undefined;
+    try {
+      orchestratorName = pi.getSessionName()?.trim() || orchestratorName;
+      const member = await spawnMember(params.task, cwd, { name, thinkingLevel, deadlineSeconds });
+      return { content: [{ type: "text", text: spawnedMessage(member) }], details: member };
+    } catch (error) {
+      return { content: [{ type: "text", text: `gang spawn failed: ${getErrorMessage(error)}` }], details: { error: true } };
+    }
+  }
+
+  async function executeStop(params: StopToolParams): Promise<ToolResult> {
+    if (params.finished === true) {
+      return { content: [{ type: "text", text: await stopFinishedMembers() }], details: undefined };
+    }
+    const role = typeof params.role === "string" ? params.role.trim() : "";
+    if (!role) {
+      return { content: [{ type: "text", text: "stop requires 'role', or set finished:true to stop all reapable members." }], details: { error: true } };
+    }
+    return { content: [{ type: "text", text: await stopMember(role) }], details: undefined };
+  }
+
+  function executeName(params: NameToolParams): ToolResult {
+    const nextName = typeof params.name === "string" ? params.name.trim() : "";
+    if (!nextName) {
+      const currentName = pi.getSessionName()?.trim() || orchestratorName;
+      return { content: [{ type: "text", text: `Agent name: ${currentName}` }], details: undefined };
+    }
+    pi.setSessionName(nextName);
+    orchestratorName = nextName;
+    return { content: [{ type: "text", text: `Agent name set: ${nextName}` }], details: { name: nextName } };
+  }
 
   pi.registerTool({
     name: "gang",
@@ -517,6 +635,7 @@ Fire up and track visible subagent "members" as live tmux panes.
 Usage:
   gang({ action: "spawn", task: "..." })                                       → launch a member (auto-named m1, m2, …)
   gang({ action: "spawn", task: "...", role: "reviewer", thinking: "high" })   → launch with an explicit name
+  gang({ action: "spawn", task: "...", deadlineSeconds: 600 })                  → wake this session if no report arrives by the deadline
   gang({ action: "list" })                                                     → show members with live pane diagnostics
   gang({ action: "clean" })                                                    → reap dead/missing panes + prune the roster
   gang({ action: "clean", force: true })                                       → also kill members that already reported back
@@ -531,6 +650,7 @@ Only "task" is required for spawn. spawn returns immediately. The member runs it
       role: Type.Optional(Type.String({ description: "Spawn name/role, or the specific member to stop when action='stop'." })),
       task: Type.Optional(Type.String({ description: "What the member should do (required for spawn)" })),
       thinking: Type.Optional(Type.String({ description: "Optional Pi thinking level for spawn: off, minimal, low, medium, high, or xhigh" })),
+      deadlineSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_DEADLINE_SECONDS, description: `Optional report deadline in seconds; wakes the supervisor on expiry.` })),
       name: Type.Optional(Type.String({ description: "New name for this agent/session when action='name'" })),
       all: Type.Optional(Type.Boolean({ description: "When action='clean', stop every tracked member." })),
       force: Type.Optional(Type.Boolean({ description: "When action='clean', also kill members that already reported back." })),
@@ -541,46 +661,15 @@ Only "task" is required for spawn. spawn returns immediately. The member runs it
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<ToolResult> {
       const action = params.action;
-      if (action === "spawn") {
-        if (typeof params.task !== "string" || !params.task) {
-          return { content: [{ type: "text", text: "spawn requires 'task'." }], details: { error: true } };
-        }
-        const name = typeof params.role === "string" && params.role.trim() ? params.role.trim() : undefined;
-        const thinkingLevel = typeof params.thinking === "string" ? params.thinking : undefined;
-        try {
-          orchestratorName = pi.getSessionName()?.trim() || orchestratorName;
-          const member = await spawnMember(params.task, ctx.cwd ?? process.cwd(), { name, thinkingLevel });
-          return { content: [{ type: "text", text: spawnedMessage(member) }], details: member };
-        } catch (error) {
-          return { content: [{ type: "text", text: `gang spawn failed: ${getErrorMessage(error)}` }], details: { error: true } };
-        }
-      }
+      if (action === "spawn") return executeSpawn(params, ctx.cwd ?? process.cwd());
       if (action === "list") {
         return { content: [{ type: "text", text: await formatRoster() }], details: undefined };
       }
       if (action === "clean") {
         return { content: [{ type: "text", text: await cleanGang({ all: params.all === true, force: params.force === true }) }], details: undefined };
       }
-      if (action === "stop") {
-        if (params.finished === true) {
-          return { content: [{ type: "text", text: await stopFinishedMembers() }], details: undefined };
-        }
-        const role = typeof params.role === "string" ? params.role.trim() : "";
-        if (!role) {
-          return { content: [{ type: "text", text: "stop requires 'role', or set finished:true to stop all reapable members." }], details: { error: true } };
-        }
-        return { content: [{ type: "text", text: await stopMember(role) }], details: undefined };
-      }
-      if (action === "name") {
-        const nextName = typeof params.name === "string" ? params.name.trim() : "";
-        if (!nextName) {
-          const currentName = pi.getSessionName()?.trim() || orchestratorName;
-          return { content: [{ type: "text", text: `Agent name: ${currentName}` }], details: undefined };
-        }
-        pi.setSessionName(nextName);
-        orchestratorName = nextName;
-        return { content: [{ type: "text", text: `Agent name set: ${nextName}` }], details: { name: nextName } };
-      }
+      if (action === "stop") return executeStop(params);
+      if (action === "name") return executeName(params);
       return { content: [{ type: "text", text: `Unknown action "${action}". Use 'spawn', 'list', 'clean', 'stop', or 'name'.` }], details: { error: true } };
     },
   });

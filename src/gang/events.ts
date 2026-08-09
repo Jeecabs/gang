@@ -8,4 +8,10 @@ export interface GangMemberReportEvent {
   timestamp: number;
   expectsReply: boolean;
   replyTo?: string;
+  subagent?: {
+    runId: string;
+    agent: string;
+    index: string;
+    final: boolean;
+  };
 }

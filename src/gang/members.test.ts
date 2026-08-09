@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildMemberEnv, computeMemberRuntimeSnapshot, isValidRole, Roster, ORCHESTRATOR } from "./members.ts";
+import { setTimeout as sleep } from "node:timers/promises";
+import { buildMemberEnv, computeMemberRuntimeSnapshot, isValidRole, MemberDeadlineTimers, Roster, ORCHESTRATOR } from "./members.ts";
 
 test("buildMemberEnv sets the 5 PI_SUBAGENT_* vars intercom reads", () => {
   const env = buildMemberEnv({ role: "worker", runId: "run-1", index: 2 });
@@ -51,6 +52,20 @@ test("Roster marks done reports and can remove by role", () => {
   assert.equal(r.list().length, 0);
 });
 
+test("Roster matches immutable child identity across role reuse", () => {
+  const r = new Roster();
+  const first = { role: "worker", task: "old", index: r.nextIndex(), paneId: "%1", runId: r.runId, spawnedAt: 1 };
+  r.add(first);
+  assert.equal(r.findByChildIdentity(r.runId, "worker", "0"), first);
+
+  r.removeByRoles(new Set(["worker"]));
+  const replacement = { role: "worker", task: "new", index: r.nextIndex(), paneId: "%2", runId: r.runId, spawnedAt: 2 };
+  r.add(replacement);
+  assert.equal(r.findByChildIdentity(r.runId, "worker", "0"), undefined);
+  assert.equal(r.findByChildIdentity(r.runId, "worker", "1"), replacement);
+  assert.equal(r.findByChildIdentity("old-run", "worker", "1"), undefined);
+});
+
 test("computeMemberRuntimeSnapshot classifies running, reported, dead, and missing panes", () => {
   const member = { role: "a", task: "t", index: 0, paneId: "%1", runId: "run", spawnedAt: 1 };
   assert.deepEqual(computeMemberRuntimeSnapshot(member, { paneId: "%1", dead: false, currentCommand: "pi", pid: 100 }), {
@@ -67,6 +82,22 @@ test("computeMemberRuntimeSnapshot classifies running, reported, dead, and missi
   assert.equal(computeMemberRuntimeSnapshot(reported, { paneId: "%1", dead: false, currentCommand: "pi", pid: 100 }).state, "reported_done");
   assert.equal(computeMemberRuntimeSnapshot(member, { paneId: "%1", dead: true, currentCommand: "pi", pid: 100 }).state, "pane_dead");
   assert.equal(computeMemberRuntimeSnapshot(member).state, "pane_missing");
+});
+
+test("MemberDeadlineTimers fires deadlines and cancels cleared roles", async () => {
+  const deadlines = new MemberDeadlineTimers();
+  const fired: string[] = [];
+  deadlines.schedule("late", Date.now() + 5, (role) => fired.push(role));
+  deadlines.schedule("cleared", Date.now() + 5, (role) => fired.push(role));
+  deadlines.clear("cleared");
+  await sleep(20);
+  assert.deepEqual(fired, ["late"]);
+
+  deadlines.schedule("clear-all-a", Date.now() + 5, (role) => fired.push(role));
+  deadlines.schedule("clear-all-b", Date.now() + 5, (role) => fired.push(role));
+  deadlines.clearAll();
+  await sleep(20);
+  assert.deepEqual(fired, ["late"]);
 });
 
 test("Roster.clear empties the roster", () => {

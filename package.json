@@ -10,8 +10,10 @@
   "files": [
     "assets",
     "src/**/*.ts",
+    "src/**/*.mjs",
+    "src/**/*.mts",
     "src/**/*.html",
-    "src/**/SKILL.md",
+    "src/**/*.md",
     "!src/**/*.test.ts",
     "!src/**/test/**",
     "NOTICE"
@@ -28,7 +30,8 @@
       "./src/gang/index.ts"
     ],
     "skills": [
-      "./src/intercom/skills"
+      "./src/intercom/skills",
+      "./src/gang/skills"
     ]
   },
   "engines": {
