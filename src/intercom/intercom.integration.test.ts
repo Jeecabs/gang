@@ -403,6 +403,7 @@ test("send with done ends a subagent session but never a top-level one", { concu
       const [, message] = await received;
 
       assert.equal(message.content.text, "All done.");
+      assert.deepEqual(message.subagent, { runId: "done-run", agent: "worker", index: "0", final: true });
       assert.equal(result.details?.delivered, true);
       assert.equal(result.details?.done, true);
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -420,8 +421,9 @@ test("send with done ends a subagent session but never a top-level one", { concu
     const result = await intercomTool.execute("send-done-boss", {
       action: "send", to: "orchestrator", message: "Still here.", done: true,
     }, new AbortController().signal, undefined, harness.ctx);
-    await received;
+    const [, message] = await received;
 
+    assert.equal(message.subagent, undefined);
     assert.equal(result.details?.delivered, true);
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(harness.shutdownCalls.length, 0, "top-level session never self-terminates on done");
@@ -743,6 +745,7 @@ test("child supervisor tool resolves target and includes run metadata", { concur
       const askResultPromise = supervisorTool.execute("ask-1", { reason: "need_decision", message: "Which API should I use?" }, new AbortController().signal, undefined, harness.ctx);
       const [askFrom, askMessage] = await askReceived;
       assert.equal(askMessage.expectsReply, true);
+      assert.deepEqual(askMessage.subagent, { runId: "78f659a3", agent: "worker", index: "0", final: false });
       assert.match(askMessage.content.text, /Subagent needs a supervisor decision/);
       assert.match(askMessage.content.text, /Run: 78f659a3/);
       assert.match(askMessage.content.text, /Agent: worker/);
@@ -759,6 +762,7 @@ test("child supervisor tool resolves target and includes run metadata", { concur
       const updateResult = await supervisorTool.execute("update-1", { reason: "progress_update", message: "Found a schema mismatch." }, new AbortController().signal, undefined, harness.ctx);
       const [_updateFrom, updateMessage] = await updateReceived;
       assert.equal(updateMessage.expectsReply, undefined);
+      assert.deepEqual(updateMessage.subagent, { runId: "78f659a3", agent: "worker", index: "0", final: false });
       assert.match(updateMessage.content.text, /Subagent progress update/);
       assert.match(updateMessage.content.text, /Run: 78f659a3/);
       assert.match(updateMessage.content.text, /Agent: worker/);
@@ -781,6 +785,7 @@ test("child supervisor tool resolves target and includes run metadata", { concur
       }, new AbortController().signal, undefined, harness.ctx);
       const [interviewFrom, interviewMessage] = await interviewReceived;
       assert.equal(interviewMessage.expectsReply, true);
+      assert.deepEqual(interviewMessage.subagent, { runId: "78f659a3", agent: "worker", index: "0", final: false });
       assert.match(interviewMessage.content.text, /Subagent requests a structured supervisor interview/);
       assert.match(interviewMessage.content.text, /Interview: API migration choices/);
       assert.match(interviewMessage.content.text, /\[context\] \(info\) Migration context/);

@@ -13,6 +13,7 @@ export interface Member {
   runId: string;
   spawnedAt: number;
   thinkingLevel?: string;
+  deadlineAt?: number;
   reportedDoneAt?: number;
   lastReportText?: string;
 }
@@ -71,6 +72,34 @@ export function isValidRole(role: string): boolean {
   return /^[a-zA-Z][a-zA-Z0-9_-]{0,31}$/.test(role);
 }
 
+export class MemberDeadlineTimers {
+  private timers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  schedule(role: string, deadlineAt: number, onDeadline: (role: string) => void): void {
+    this.clear(role);
+    const timer = setTimeout(() => {
+      this.timers.delete(role);
+      onDeadline(role);
+    }, Math.max(1, deadlineAt - Date.now()));
+    timer.unref?.();
+    this.timers.set(role, timer);
+  }
+
+  clear(role: string): void {
+    const timer = this.timers.get(role);
+    if (timer) clearTimeout(timer);
+    this.timers.delete(role);
+  }
+
+  clearMany(roles: Iterable<string>): void {
+    for (const role of roles) this.clear(role);
+  }
+
+  clearAll(): void {
+    this.clearMany(this.timers.keys());
+  }
+}
+
 /** Tracks the members one superintendent session has spawned. One runId per superintendent process. */
 export class Roster {
   readonly runId = randomUUID();
@@ -91,6 +120,14 @@ export class Roster {
 
   findByRole(role: string): Member | undefined {
     return this.members.find((member) => member.role === role);
+  }
+
+  findByChildIdentity(runId: string, agent: string, index: string): Member | undefined {
+    return this.members.find((member) => (
+      member.runId === runId
+      && member.role === agent
+      && String(member.index) === index
+    ));
   }
 
   markReportedDone(role: string, reportedDoneAt = Date.now(), text?: string): boolean {

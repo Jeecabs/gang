@@ -9,7 +9,7 @@ import { ComposeOverlay, type ComposeResult } from "./ui/compose.ts";
 import { InlineMessageComponent } from "./ui/inline-message.ts";
 import { loadConfig, type IntercomConfig } from "./config.ts";
 import { SUPERINTENDENT_NAMED_EVENT, GANG_MEMBER_REPORT_EVENT } from "../gang/events.ts";
-import type { SessionInfo, Message, Attachment } from "./types.ts";
+import type { SessionInfo, Message, Attachment, SubagentMessageMetadata } from "./types.ts";
 import { ReplyTracker } from "./reply-tracker.ts";
 import { summarizeResultText } from "../compact-result.ts";
 
@@ -120,6 +120,10 @@ function readChildOrchestratorMetadata(): ChildOrchestratorMetadata | null {
     ...(sessionName ? { sessionName } : {}),
   };
 }
+function toSubagentMessageMetadata(metadata: ChildOrchestratorMetadata, final = false): SubagentMessageMetadata {
+  return { runId: metadata.runId, agent: metadata.agent, index: metadata.index, final };
+}
+
 function formatChildOrchestratorMessage(kind: "ask" | "update" | "interview", metadata: ChildOrchestratorMetadata, message: string): string {
   const heading = kind === "ask"
     ? "Subagent needs a supervisor decision."
@@ -706,6 +710,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       timestamp: message.timestamp,
       expectsReply: message.expectsReply === true,
       replyTo: message.replyTo,
+      subagent: message.subagent,
     });
     const entry = { from, message, replyCommand, bodyText };
     void (async () => {
@@ -1187,6 +1192,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
           try {
             const result = await connectedClient.send(sendTo, {
               text: formatChildOrchestratorMessage("update", metadata, message),
+              subagent: toSubagentMessageMetadata(metadata),
             });
             if (!result.delivered) {
               const errorText = result.reason ?? "Session may not exist or has disconnected.";
@@ -1241,6 +1247,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
             messageId: questionId,
             text: requestText,
             expectsReply: true,
+            subagent: toSubagentMessageMetadata(metadata),
           });
           if (!sendResult.delivered) {
             const errorText = sendResult.reason ?? "Session may not exist or has disconnected.";
@@ -1464,6 +1471,9 @@ Usage:
               text: message,
               attachments,
               replyTo,
+              subagent: childOrchestratorMetadata
+                ? toSubagentMessageMetadata(childOrchestratorMetadata, done === true)
+                : undefined,
             });
             if (!result.delivered) {
               const errorText = result.reason ?? "Session may not exist or has disconnected.";
@@ -1551,6 +1561,9 @@ Usage:
               attachments,
               replyTo,
               expectsReply: true,
+              subagent: childOrchestratorMetadata
+                ? toSubagentMessageMetadata(childOrchestratorMetadata)
+                : undefined,
             });
 
             if (!sendResult.delivered) {
@@ -1626,6 +1639,9 @@ Usage:
             const result = await connectedClient.send(target.from.id, {
               text: message,
               replyTo: target.message.id,
+              subagent: childOrchestratorMetadata
+                ? toSubagentMessageMetadata(childOrchestratorMetadata)
+                : undefined,
             });
             if (!result.delivered) {
               const errorText = result.reason ?? "Session may not exist or has disconnected.";

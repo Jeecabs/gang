@@ -106,7 +106,7 @@ tail -f ~/.pi/agent/intercom/intercom.jsonl
 
 | Surface | What |
 |---|---|
-| `gang` tool | `{action:"spawn", task, role?, thinking?}` · `{action:"list"}` · `{action:"clean", force?, all?}` · `{action:"stop", role? finished?}` · `{action:"name", name}` — model-callable |
+| `gang` tool | `{action:"spawn", task, role?, thinking?, deadlineSeconds?}` · `{action:"list"}` · `{action:"clean", force?, all?}` · `{action:"stop", role? finished?}` · `{action:"name", name}` — model-callable |
 | `/gang` | show the roster |
 | `/gang spawn [@name] [-t <level>] <task>` | spawn a member by hand; name optional (auto `m1`, `m2`, …). Levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `/gang clean` · `/gang clean --force` · `/gang clean all` | `clean` reaps dead/missing panes and prunes stale roster entries; `clean --force` also kills members that already reported back; `clean all` stops this superintendent's members (detached mode kills the `gang` session; in-tmux mode kills direct member panes only) |
@@ -118,9 +118,31 @@ tail -f ~/.pi/agent/intercom/intercom.jsonl
 
 Env knobs: `GANG_GUI_PORT` (default `7717`), `GANG_TMUX_BIN` (default Homebrew tmux), `GANG_FEED_HOURS` (mission-control feed recency window, default `6`).
 
+Set `deadlineSeconds` on a tool-driven spawn when a workflow needs a terminal failure path. If the member does not report in time, gang wakes the superintendent with its latest pane state. It does not kill the member automatically.
+
 Finished members linger on purpose — their panes stay (`remain-on-exit on`) so you can read the final state. Reap them when you're done with `/gang clean` (or `gang({ action: "clean" })`). If a member has already reported back but its pane is still hanging around, use `/gang clean --force` or `/gang stop --all-finished`. `/gang stop <member>` is the first-class escape hatch when you know a specific pane should die. `/gang clean all` tears down the detached `gang` session outside tmux; inside tmux it kills this superintendent's direct member panes only.
 
 Agent naming: an unnamed orchestrator session claims `superintendent of <current-folder>` (e.g. `superintendent of private-evals`) **on its first spawn**, not at startup — so plain Pi sessions stay unnamed in the `pi -r` resume list. Use `/gang name <name>` before spawning to pick a custom target; spawned members get that exact supervisor name. Member task prompts also tell agents to name themselves with `gang({ action: "name", name: "<clear role/name>" })` before spinning up their own teammate.
+
+## Gang review skill
+
+The package includes a parallel review skill. It starts visible gang reviewers and returns
+patch-anchored P0-P3 findings, confidence scores, and a ship verdict. The skill does not
+run for a general review request. Start it explicitly:
+
+```text
+/skill:gang-review worktree
+/skill:gang-review against main
+/skill:gang-review commit abc123
+/skill:gang-review https://github.com/owner/repo/pull/123
+```
+
+The skill supports worktree, base-branch, single-commit, and GitHub PR reviews. It filters lock
+files, generated output, build output, and binary files.
+
+The skill assigns related files to the same reviewer and runs reviewers in parallel. Each reviewer
+is read-only and reports through intercom. The superintendent validates and deduplicates all
+findings before it gives the verdict.
 
 ## How it's wired
 
@@ -130,7 +152,7 @@ Agent naming: an unnamed orchestrator session claims `superintendent of <current
   `contact_supervisor` tools. **Owned** — imports retargeted to `@earendil-works/*`, plus a broker
   message **tap** (durable log) and an embedded **HTTP/SSE** mission-control server.
 - `src/gang/` — the `gang` tool (spawn members in tmux, list the roster), the `/gang watch`
-  overlay, and superintendent auto-naming.
+  overlay, superintendent auto-naming, and the `gang-review` skill.
 
 `gang spawn <task>` (optionally `@name`) launches `pi --name <name> … @<taskfile>` in a tmux pane with five
 `PI_SUBAGENT_*` env vars. Pass `--thinking <level>` to add Pi's `--thinking` flag for that member.
