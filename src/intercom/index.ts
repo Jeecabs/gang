@@ -685,6 +685,15 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
     if (!liveContext) {
       return;
     }
+    pi.events.emit(GANG_MEMBER_REPORT_EVENT, {
+      fromId: from.id,
+      fromName: from.name,
+      text: message.content.text,
+      timestamp: message.timestamp,
+      expectsReply: message.expectsReply === true,
+      replyTo: message.replyTo,
+      subagent: message.subagent,
+    });
     if (replyWaiter) {
       const senderTarget = from.name || from.id;
       const fromMatches = senderTarget.toLowerCase() === replyWaiter.from.toLowerCase()
@@ -703,15 +712,6 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       ? `intercom({ action: "reply", message: "..." })`
       : undefined;
     replyTracker.recordIncomingMessage(from, message);
-    pi.events.emit(GANG_MEMBER_REPORT_EVENT, {
-      fromId: from.id,
-      fromName: from.name,
-      text: message.content.text,
-      timestamp: message.timestamp,
-      expectsReply: message.expectsReply === true,
-      replyTo: message.replyTo,
-      subagent: message.subagent,
-    });
     const entry = { from, message, replyCommand, bodyText };
     void (async () => {
       const activeContext = getLiveContext(liveContext, messageGeneration);
