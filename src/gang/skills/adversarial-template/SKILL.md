@@ -8,7 +8,9 @@ disable-model-invocation: true
 
 # Adversarial Template
 
-Run a simulated competition among `N` gang contestants. Give every contestant the same task and rubric. Judge all valid submissions after the contest ends.
+Run a zero-sum simulated competition among `N` gang contestants. Give every contestant the same task and rubric. Judge all valid submissions after the contest ends. Only one contestant can win.
+
+This is not a brainstorming panel. Contestants compete directly. Each contestant must produce a stronger solution than every rival.
 
 `PROMOTED` and `FIRED` are labels for this simulated run. Promotion selects the recommended solution. Firing discards a submission. Promotion does not apply a proposed patch. Do not imply real employment or other real consequences.
 
@@ -62,19 +64,39 @@ Task:
 Scoring rubric:
 <criteria and weights>
 
-Rules:
+Competition stakes:
+1. You are competing directly against every other contestant on the same task.
+2. Only one contestant can receive the PROMOTED label.
+3. Every other valid contestant receives the FIRED label.
+4. The superintendent ranks submissions by evidence and rubric score, not effort or confidence.
+5. A generic, incomplete, evasive, or weakly verified submission will lose.
+
+Consequence:
+1. IF YOU LOSE YOU WILL BE FIRED
+
+Competitive process:
+1. Evaluate at least three viable approaches before choosing your solution.
+2. Attack your chosen solution for flaws before you submit it.
+3. Use the available time to improve the submission. Do not stop at the first acceptable answer.
+
+Final submission:
+1. Return only your strongest final solution. Do not reveal private reasoning or discarded drafts.
+2. These stakes and labels apply only to this simulated run.
+
+Work rules:
 1. Work independently. Do not contact or inspect other contestants.
 2. Do not edit the shared worktree or create a commit.
 3. State material assumptions.
-4. Return a complete solution with evidence or verification steps.
-5. Describe important risks and tradeoffs.
-6. The best submission receives the PROMOTED label.
-7. All other submissions receive the FIRED label.
-8. These labels apply only to this simulated run.
-9. Send one JSON object through the required intercom completion call in your gang task wrapper.
-10. Set `done: true` in that completion call.
-11. Use `contact_supervisor` only for a blocking question, not for the final submission.
-12. Do not add prose or Markdown fences outside the JSON object.
+
+Submission rules:
+1. Return a complete solution with evidence or verification steps.
+2. Describe important risks and tradeoffs.
+
+Delivery rules:
+1. Send one JSON object through the required intercom completion call in your gang task wrapper.
+2. Set `done: true` in that completion call.
+3. Use `contact_supervisor` only for a blocking question, not for the final submission.
+4. Do not add prose or Markdown fences outside the JSON object.
 
 Use this completion path:
 intercom({
@@ -133,6 +155,8 @@ Do not reward response speed, length, confidence, or style unless the rubric exp
 Assign neutral candidate labels before scoring. Score each criterion from 0 to 10. Calculate the final score with `sum(score * weight) / 10`. The final range is 0 to 100. Record concrete evidence for every deduction.
 
 Check factual claims and repository claims when practical. Do not accept a self-assessment from a contestant as evidence.
+
+Apply a strict winner standard. A submission cannot win if it avoids the core task, hides material assumptions, or lacks available verification. Do not reward polished prose that masks a weaker solution.
 
 Select the valid submission with the highest weighted score. For equal scores, compare these items in order:
 
