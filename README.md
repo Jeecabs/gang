@@ -145,6 +145,19 @@ The skill assigns related files to the same reviewer and runs reviewers in paral
 is read-only and reports through intercom. The superintendent validates and deduplicates all
 findings before it gives the verdict.
 
+## Adversarial template skill
+
+The package includes an explicit best-of-N contest skill. Each gang contestant receives the same
+task and scoring rubric. The superintendent evaluates every valid submission, promotes one winner,
+and fires the others from the simulated run.
+
+```text
+/skill:adversarial-template 3 design a retry policy for this API client
+```
+
+Contestants return independent answers, plans, or proposed patches. They do not edit the shared
+worktree. The skill selects a recommended solution but does not apply it.
+
 ## How it's wired
 
 `package.json` → `pi.extensions` points Pi at two TypeScript entry files it loads on startup:
