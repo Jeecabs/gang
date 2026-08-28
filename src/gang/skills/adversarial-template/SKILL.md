@@ -143,7 +143,9 @@ Select the valid submission with the highest weighted score. For equal scores, c
 
 If the candidates remain equal, report a tie with the tied scorecard. Mark each tied result `PENDING`. Do not assign `PROMOTED` or `FIRED` labels. Ask the user to choose the winner.
 
-Keep the contest roles until the user responds. After the user chooses, continue to section 6. If the user cancels, report `NO VERDICT` and stop each contest role individually.
+Retain every valid submission and the tied scorecard in the superintendent context. Stop each contest role individually after presenting the tie. Then ask the user to choose.
+
+After the user chooses, continue to section 6 with the retained submissions. If the user cancels, report `NO VERDICT`. Do not restart the contestants.
 
 ## 6. Report and clean up
 
@@ -176,4 +178,4 @@ Continue only after the scoring rules or the user identifies one winner. Use thi
 
 Mark every non-winning valid submission `FIRED`. Mark invalid or late submissions `DISQUALIFIED`, not `FIRED`.
 
-Send the result to contestants that remain connected. Stop each contest role individually after reporting. Do not stop unrelated gang members.
+Send the result to contestants that remain connected. Stop each contest role that has not already stopped. Do not stop unrelated gang members.
