@@ -53,14 +53,15 @@ export function computeMemberRuntimeSnapshot(member: Member, pane?: PaneDetails)
 }
 
 /**
- * The 5 env vars pi-intercom reads at child startup (index.ts readChildOrchestratorMetadata):
+ * The env vars pi-intercom reads at child startup (index.ts readChildOrchestratorMetadata):
  * presence name comes from pi's --name flag, but these unlock the contact_supervisor tool and
  * tell the member who its supervisor is.
  */
-export function buildMemberEnv(opts: { role: string; runId: string; index: number; orchestrator?: string }): Record<string, string> {
+export function buildMemberEnv(opts: { role: string; runId: string; index: number; orchestrator?: string; orchestratorSessionId?: string }): Record<string, string> {
   return {
     PI_SUBAGENT_INTERCOM_SESSION_NAME: opts.role,
     PI_SUBAGENT_ORCHESTRATOR_TARGET: opts.orchestrator ?? ORCHESTRATOR,
+    ...(opts.orchestratorSessionId ? { PI_SUBAGENT_ORCHESTRATOR_SESSION_ID: opts.orchestratorSessionId } : {}),
     PI_SUBAGENT_RUN_ID: opts.runId,
     PI_SUBAGENT_CHILD_AGENT: opts.role,
     PI_SUBAGENT_CHILD_INDEX: String(opts.index),

@@ -30,7 +30,7 @@ import {
 import { FeedClient } from "./feed-client.ts";
 import { GUI_PORT } from "../intercom/gui/server.js";
 import { MissionControlOverlay } from "./ui/mission-control.ts";
-import { SUPERINTENDENT_NAMED_EVENT, GANG_MEMBER_REPORT_EVENT, type GangMemberReportEvent } from "./events.ts";
+import { SUPERINTENDENT_NAMED_EVENT, GANG_MEMBER_REPORT_EVENT, INTERCOM_SESSION_ID_REQUEST_EVENT, type GangMemberReportEvent, type IntercomSessionIdRequest } from "./events.ts";
 import { summarizeResultText } from "../compact-result.ts";
 
 const execFileP = promisify(execFile);
@@ -297,7 +297,12 @@ export default function gangExtension(pi: ExtensionAPI) {
     }
     const taskFile = writeTaskFile(role, task, index);
     // Forward PATH so the pane resolves `pi` even if the tmux server started with a minimal env.
-    const env = { PATH: process.env.PATH ?? "", ...buildMemberEnv({ role, runId: roster.runId, index, orchestrator: orchestratorName }) };
+    const idRequest: IntercomSessionIdRequest = {};
+    pi.events.emit(INTERCOM_SESSION_ID_REQUEST_EVENT, idRequest);
+    const env = {
+      PATH: process.env.PATH ?? "",
+      ...buildMemberEnv({ role, runId: roster.runId, index, orchestrator: orchestratorName, orchestratorSessionId: idRequest.sessionId }),
+    };
     const command = memberCommand({ role, taskFile, intercomIndex: INTERCOM_INDEX, gangIndex: GANG_INDEX, thinkingLevel });
 
     if (!inTmux) await ensureGangSession();

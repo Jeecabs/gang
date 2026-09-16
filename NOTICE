@@ -6,7 +6,7 @@ This product vendors and modifies source from pi-intercom, used under the MIT Li
   pi-intercom
   Copyright (c) 2026 Nico Bailon
   https://github.com/nicobailon/pi-intercom
-  Synchronized through v0.9.3 (commit 8b189e8668a3335c92f7fbd8531363502e924a9b)
+  Synchronized through v0.13.0 (commit 199279ae861bf53ce014809fb2a03337538ae13e)
 
 The vendored source lives under src/intercom/. It has been modified with gang lifecycle
 metadata, compact tool results, a broker message tap, and an embedded mission-control

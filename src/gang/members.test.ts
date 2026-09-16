@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { setTimeout as sleep } from "node:timers/promises";
 import { buildMemberEnv, computeMemberRuntimeSnapshot, isValidRole, MemberDeadlineTimers, Roster, ORCHESTRATOR } from "./members.ts";
 
-test("buildMemberEnv sets the 5 PI_SUBAGENT_* vars intercom reads", () => {
+test("buildMemberEnv sets the PI_SUBAGENT_* vars intercom reads", () => {
   const env = buildMemberEnv({ role: "worker", runId: "run-1", index: 2 });
   assert.deepEqual(env, {
     PI_SUBAGENT_INTERCOM_SESSION_NAME: "worker",
@@ -13,6 +13,8 @@ test("buildMemberEnv sets the 5 PI_SUBAGENT_* vars intercom reads", () => {
     PI_SUBAGENT_CHILD_INDEX: "2",
   });
   assert.equal(ORCHESTRATOR, "superintendent");
+  const withId = buildMemberEnv({ role: "worker", runId: "run-1", index: 2, orchestratorSessionId: "sup-id" });
+  assert.equal(withId.PI_SUBAGENT_ORCHESTRATOR_SESSION_ID, "sup-id");
 });
 
 test("isValidRole accepts safe tokens, rejects shell/tmux-hostile ones", () => {
