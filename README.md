@@ -10,9 +10,9 @@ bus**, and observe everything three ways: live panes, a durable log, and a missi
 in your terminal (a Pi overlay) **and** in the browser.
 
 Built on a vendored, fully-owned copy of [pi-intercom](https://github.com/nicobailon/pi-intercom)
-**v0.9.3** (MIT). No external `pi-intercom` runtime dependency; npm deps install with the package.
+**v0.13.0** (MIT). No external `pi-intercom` runtime dependency; npm deps install with the package.
 A dev-only version pin lets Dependabot flag new Intercom releases, while CI requires the vendored
-version marker to match. Targets `@earendil-works` Pi **0.84.x** (`>=0.84.1 <0.85.0`).
+version marker to match. Targets `@earendil-works` Pi **0.85.x** (`>=0.85.1 <0.86.0`).
 
 ```
 ┌─ tmux panes ──────────────┐   raw per-agent view — watch each member's pi session
@@ -30,7 +30,7 @@ version marker to match. Targets `@earendil-works` Pi **0.84.x** (`>=0.84.1 <0.8
 
 ## Requirements
 
-- **Pi** (`@earendil-works/pi-coding-agent`) 0.84.x, ≥ 0.84.1 — `pi --version`
+- **Pi** (`@earendil-works/pi-coding-agent`) 0.85.x, ≥ 0.85.1 — `pi --version`
 - **tmux** — members run as visible panes (`brew install tmux`)
 - **Node** ≥ 22
 
@@ -168,7 +168,7 @@ worktree. The skill selects a recommended solution but does not apply it.
 - `src/gang/` — the `gang` tool (spawn members in tmux, list the roster), the `/gang watch`
   overlay, superintendent auto-naming, and the `gang-review` skill.
 
-`gang spawn <task>` (optionally `@name`) launches `pi --name <name> … @<taskfile>` in a tmux pane with five
+`gang spawn <task>` (optionally `@name`) launches `pi --name <name> … @<taskfile>` in a tmux pane with
 `PI_SUBAGENT_*` env vars. Pass `--thinking <level>` to add Pi's `--thinking` flag for that member.
 The vendored intercom extension reads the env vars at child startup to register
 the member on the bus and unlock its `contact_supervisor` tool — that's the whole contract:
@@ -177,10 +177,23 @@ the member on the bus and unlock its `contact_supervisor` tool — that's the wh
 |---|---|---|
 | `PI_SUBAGENT_INTERCOM_SESSION_NAME` | `<role>` | member's intercom identity |
 | `PI_SUBAGENT_ORCHESTRATOR_TARGET` | current supervisor name (`superintendent of <folder>` or custom `/gang name`) | who it reports to |
+| `PI_SUBAGENT_ORCHESTRATOR_SESSION_ID` | supervisor's intercom session ID | reports still arrive after `/gang name` or `/alias` renames the supervisor |
 | `PI_SUBAGENT_RUN_ID` / `_CHILD_AGENT` / `_CHILD_INDEX` | run metadata | unlocks `contact_supervisor` |
 
 (The member's addressable **name** comes from Pi's `--name` flag; the supervisor self-names
 lazily to the computed or custom `orchestratorName`.)
+
+## Roadmap
+
+- **Busy-aware messaging in the vendored intercom.** Presence already carries each session's
+  lifecycle status (`idle`, `thinking`, `tool:<name>`, see `currentStatus()` in
+  `src/intercom/index.ts`), but only `list` shows it. Ideas to design and build in `src/intercom/`:
+  - `send` / `ask` results say when the target is busy and with what, so a sender knows an `ask`
+    may wait on a long tool call.
+  - A timestamp for when the current status started, so peers can tell "busy" from "stuck".
+  - A way to wait until a target goes idle, so senders do not poll `list`.
+
+  Upstream pi-intercom (up to v0.13.0) does not provide this, so gang owns the design.
 
 ## Develop
 

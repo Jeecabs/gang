@@ -2,7 +2,8 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { getIntercomDirPath } from "./broker/paths.ts";
 
-export const DEFAULT_ASK_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFAULT_ASK_TIMEOUT_MS = 10 * 60 * 1000;
+const INTERCOM_SCOPE_ID_ENV = "PI_INTERCOM_SCOPE_ID";
 
 export function getAskTimeoutMs(): number {
   const raw = process.env.PI_INTERCOM_ASK_TIMEOUT_MS;
@@ -15,6 +16,11 @@ export function getAskTimeoutMs(): number {
     throw new Error("PI_INTERCOM_ASK_TIMEOUT_MS must be a positive integer number of milliseconds");
   }
   return value;
+}
+
+export function getIntercomScopeId(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const scopeId = env[INTERCOM_SCOPE_ID_ENV]?.trim();
+  return scopeId ? scopeId : undefined;
 }
 
 export type InboundTriggerPolicy = "always" | "replies" | "never";
@@ -151,7 +157,7 @@ export function loadConfig(): IntercomConfig {
 
     return config;
   } catch (error) {
-    console.error(`Failed to load intercom config at ${configPath}:`, error);
-    return { ...defaults, inboundTrigger: "never" };
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to load intercom config at ${configPath}: ${message}`, { cause: error });
   }
 }

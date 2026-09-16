@@ -3,15 +3,17 @@ import net from "net";
 import { randomUUID } from "crypto";
 import { writeMessage, createMessageReader } from "./framing.ts";
 import { getBrokerConnectTarget, type BrokerConnectTarget } from "./paths.ts";
-import { EXTENSION_BUS_FEATURE, isMessage, isSessionInfo } from "../types.ts";
+import { isMessage, isMessageControl, isMessageReceipt, isSessionInfo } from "./protocol.ts";
+import { getIntercomScopeId } from "../config.ts";
+import { EXACT_SEND_FEATURE, EXTENSION_BUS_FEATURE, type DeliveryDetails } from "../types.ts";
 import type {
   Attachment,
   BrokerMessage,
   ClientMessage,
   Message,
   MessageControl,
+  MessageProvenance,
   MessageReceipt,
-  MessageReceiptStatus,
   SessionInfo,
   SessionRegistration,
   SubagentMessageMetadata,
@@ -25,10 +27,11 @@ interface SendOptions {
   messageId?: string;
   supersedes?: string;
   retryOf?: string;
+  provenance?: MessageProvenance;
   subagent?: SubagentMessageMetadata;
 }
 
-interface SendResult {
+export interface SendResult extends DeliveryDetails {
   id: string;
   delivered: boolean;
   reason?: string;
@@ -60,45 +63,6 @@ function connectToBrokerTarget(target: BrokerConnectTarget): net.Socket {
   return typeof target === "string"
     ? net.connect(target)
     : net.connect({ host: target.host, port: target.port });
-}
-
-function isMessageReceiptStatus(value: unknown): value is MessageReceiptStatus {
-  return value === "receiver_received"
-    || value === "queued"
-    || value === "injected"
-    || value === "acknowledged"
-    || value === "expired"
-    || value === "cancelled"
-    || value === "superseded"
-    || value === "cancellation_requested";
-}
-
-function isMessageReceipt(value: unknown): value is MessageReceipt {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const receipt = value as Record<string, unknown>;
-  if (typeof receipt.messageId !== "string" || !isMessageReceiptStatus(receipt.status) || typeof receipt.timestamp !== "number") {
-    return false;
-  }
-  return receipt.detail === undefined || typeof receipt.detail === "string";
-}
-
-function isMessageControl(value: unknown): value is MessageControl {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const control = value as Record<string, unknown>;
-  if (typeof control.messageId !== "string" || typeof control.timestamp !== "number") {
-    return false;
-  }
-  if (control.action !== "cancel" && control.action !== "supersede") {
-    return false;
-  }
-  if (control.supersededBy !== undefined && typeof control.supersededBy !== "string") {
-    return false;
-  }
-  return control.detail === undefined || typeof control.detail === "string";
 }
 
 export class IntercomClient extends EventEmitter {
@@ -321,10 +285,12 @@ export class IntercomClient extends EventEmitter {
       this.once("_registered", onRegistered);
       
       try {
+        const scopeId = getIntercomScopeId();
         writeMessage(socket, {
           type: "register",
           session,
           ...(sessionId ? { sessionId } : {}),
+          ...(scopeId ? { scopeId } : {}),
           ...(typeof target === "string" ? {} : { stateId: target.stateId }),
         });
       } catch (error) {
@@ -407,8 +373,8 @@ export class IntercomClient extends EventEmitter {
       }
 
       case "delivered": {
-        const { messageId } = brokerMessage;
-        if (typeof messageId !== "string") {
+        const { messageId, delivery, retryable, outcomeKnown } = brokerMessage;
+        if (typeof messageId !== "string" || (delivery !== undefined && delivery !== "socket_delivered" && delivery !== "queued") || (retryable !== undefined && typeof retryable !== "boolean") || (outcomeKnown !== undefined && typeof outcomeKnown !== "boolean")) {
           throw new Error("Invalid delivered message");
         }
 
@@ -419,13 +385,13 @@ export class IntercomClient extends EventEmitter {
         }
 
         this.pendingSends.delete(messageId);
-        pending.resolve({ id: messageId, delivered: true });
+        pending.resolve({ id: messageId, delivered: true, delivery: delivery as "socket_delivered" | "queued" | undefined ?? "socket_delivered", retryable: retryable as boolean | undefined ?? false, outcomeKnown: outcomeKnown as boolean | undefined ?? true, ...(typeof brokerMessage.code === "string" ? { code: brokerMessage.code } : {}) });
         break;
       }
 
       case "delivery_failed": {
-        const { messageId, reason } = brokerMessage;
-        if (typeof messageId !== "string" || typeof reason !== "string") {
+        const { messageId, reason, delivery, retryable, outcomeKnown } = brokerMessage;
+        if (typeof messageId !== "string" || typeof reason !== "string" || (delivery !== undefined && delivery !== "failed" && delivery !== "unknown") || (retryable !== undefined && typeof retryable !== "boolean") || (outcomeKnown !== undefined && typeof outcomeKnown !== "boolean")) {
           throw new Error("Invalid delivery_failed message");
         }
 
@@ -436,7 +402,7 @@ export class IntercomClient extends EventEmitter {
         }
 
         this.pendingSends.delete(messageId);
-        pending.resolve({ id: messageId, delivered: false, reason });
+        pending.resolve({ id: messageId, delivered: false, reason, delivery: delivery as "failed" | "unknown" | undefined ?? "failed", retryable: retryable as boolean | undefined ?? false, outcomeKnown: outcomeKnown as boolean | undefined ?? true, ...(typeof brokerMessage.code === "string" ? { code: brokerMessage.code } : {}) });
         break;
       }
 
@@ -654,12 +620,12 @@ export class IntercomClient extends EventEmitter {
     });
   }
 
-  send(to: string, options: SendOptions): Promise<SendResult> {
+  async send(to: string, options: SendOptions): Promise<SendResult> {
     let socket: net.Socket;
     try {
       socket = this.requireActiveSocket();
     } catch (error) {
-      return Promise.reject(toError(error));
+      throw toError(error);
     }
     
     const messageId = options.messageId ?? randomUUID();
@@ -671,6 +637,7 @@ export class IntercomClient extends EventEmitter {
       retryOf: options.retryOf,
       replyTo: options.replyTo,
       expectsReply: options.expectsReply,
+      provenance: options.provenance,
       subagent: options.subagent,
       content: {
         text: options.text,
@@ -678,7 +645,7 @@ export class IntercomClient extends EventEmitter {
       },
     };
 
-    return new Promise((resolve, reject) => {
+    const sendOnce = (targetId?: string, targetEpoch?: string): Promise<SendResult> => new Promise((resolve, reject) => {
       const wrappedResolve = (result: SendResult) => {
         clearTimeout(timeout);
         resolve(result);
@@ -696,13 +663,34 @@ export class IntercomClient extends EventEmitter {
       this.pendingSends.set(messageId, { resolve: wrappedResolve, reject: wrappedReject });
 
       try {
-        writeMessage(socket, { type: "send", to, message });
+        writeMessage(socket, { type: "send", to, message, ...(targetId && targetEpoch ? { targetId, targetEpoch } : {}) });
       } catch (error) {
         clearTimeout(timeout);
         this.pendingSends.delete(messageId);
         reject(toError(error));
       }
     });
+
+    if (!this.supportsFeature(EXACT_SEND_FEATURE) || options.replyTo) {
+      return sendOnce();
+    }
+
+    const resolveTarget = async (): Promise<{ id: string; epoch: string } | null> => {
+      const sessions = await this.listSessions();
+      const byId = sessions.find((session) => session.id === to);
+      const byName = byId ? [] : sessions.filter((session) => session.name?.toLowerCase() === to.toLowerCase());
+      const byPrefix = byId || byName.length > 0 ? [] : sessions.filter((session) => session.id.startsWith(to));
+      const matches = byId ? [byId] : byName.length > 0 ? byName : byPrefix;
+      const target = matches.length === 1 ? matches[0]! : null;
+      return target?.endpointEpoch ? { id: target.id, epoch: target.endpointEpoch } : null;
+    };
+
+    const target = await resolveTarget();
+    if (!target) return sendOnce();
+    const result = await sendOnce(target.id, target.epoch);
+    if (result.code !== "E_TARGET_REBOUND") return result;
+    const reboundTarget = await resolveTarget();
+    return reboundTarget ? sendOnce(reboundTarget.id, reboundTarget.epoch) : result;
   }
 
   cancelMessage(messageId: string): Promise<SendResult> {
@@ -770,7 +758,7 @@ export class IntercomClient extends EventEmitter {
     }
   }
 
-  updatePresence(updates: { name?: string; status?: string; model?: string; contextPct?: number | null; contextTokens?: number | null; contextWindow?: number | null }): void {
+  updatePresence(updates: { name?: string; runtimeFallbackAlias?: boolean; status?: string; model?: string; contextPct?: number | null; contextTokens?: number | null; contextWindow?: number | null }): void {
     if (this.disconnecting) {
       return;
     }

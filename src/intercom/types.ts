@@ -1,8 +1,22 @@
 export const EXTENSION_BUS_FEATURE = "extension-bus-v1";
+export const EXACT_SEND_FEATURE = "exact-send-v1";
+
+export type DeliveryState = "socket_delivered" | "queued" | "failed" | "unknown";
+
+export interface DeliveryDetails {
+  delivery: DeliveryState;
+  code?: string;
+  retryable: boolean;
+  outcomeKnown: boolean;
+}
 
 export interface SessionInfo {
   id: string;
+  /** Broker-owned lifetime of this live endpoint. */
+  endpointEpoch?: string;
   name?: string;
+  /** True only when the extension synthesized name for an unnamed runtime. */
+  runtimeFallbackAlias?: boolean;
   cwd: string;
   model: string;
   pid: number;
@@ -19,6 +33,13 @@ export interface SessionInfo {
   contextPct?: number;
   contextTokens?: number;
   contextWindow?: number;
+  /** tmux pane id (e.g. "%212") of the session's terminal, read from
+   *  $TMUX_PANE at registration. Present only when the session runs inside a
+   *  tmux pane; absent for cloud, headless, IDE-embedded, or Herdr sessions.
+   *  The pane id is immutable for the process lifetime — unlike the window
+   *  name, which is mutable — so a peer can live-resolve the current window
+   *  from it via tmux when it needs to introspect or drive that pane. */
+  tmuxPane?: string;
 }
 
 export interface SubagentMessageMetadata {
@@ -40,11 +61,19 @@ export interface Message {
   retryOf?: string;
   replyTo?: string;
   expectsReply?: boolean;
+  provenance?: MessageProvenance;
   subagent?: SubagentMessageMetadata;
   content: {
     text: string;
     attachments?: Attachment[];
   };
+}
+
+export interface MessageProvenance {
+  type: "extension_outbox";
+  extensionId: string;
+  extensionName: string;
+  requestId: string;
 }
 
 export interface Attachment {
@@ -78,82 +107,20 @@ export interface ExtensionCapability {
   ownerEligible: boolean;
 }
 
-export type SessionRegistration = Omit<SessionInfo, "id" | "peerUid" | "trustedLocal"> & {
+export type SessionRegistration = Omit<SessionInfo, "id" | "endpointEpoch" | "peerUid" | "trustedLocal"> & {
   extensions?: ExtensionCapability[];
 };
 
-function isSubagentMessageMetadata(value: unknown): value is SubagentMessageMetadata {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const metadata = value as Record<string, unknown>;
-  return typeof metadata.runId === "string"
-    && typeof metadata.agent === "string"
-    && typeof metadata.index === "string"
-    && typeof metadata.final === "boolean";
-}
-
-function isAttachment(value: unknown): value is Attachment {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const attachment = value as Record<string, unknown>;
-  if (attachment.type !== "file" && attachment.type !== "snippet" && attachment.type !== "context") return false;
-  if (typeof attachment.name !== "string" || typeof attachment.content !== "string") return false;
-  return attachment.language === undefined || typeof attachment.language === "string";
-}
-
-export function isMessage(value: unknown): value is Message {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const message = value as Record<string, unknown>;
-  if (typeof message.id !== "string" || typeof message.timestamp !== "number") return false;
-  for (const key of ["senderSequence", "brokerReceivedAt", "brokerDeliveredAt", "receiverReceivedAt", "injectedAt"] as const) {
-    if (message[key] !== undefined && typeof message[key] !== "number") return false;
-  }
-  if (message.supersedes !== undefined && typeof message.supersedes !== "string") return false;
-  if (message.retryOf !== undefined && typeof message.retryOf !== "string") return false;
-  if (message.replyTo !== undefined && typeof message.replyTo !== "string") return false;
-  if (message.expectsReply !== undefined && typeof message.expectsReply !== "boolean") return false;
-  if (message.subagent !== undefined && !isSubagentMessageMetadata(message.subagent)) return false;
-  if (typeof message.content !== "object" || message.content === null || Array.isArray(message.content)) return false;
-  const content = message.content as Record<string, unknown>;
-  if (typeof content.text !== "string") return false;
-  return content.attachments === undefined
-    || (Array.isArray(content.attachments) && content.attachments.every(isAttachment));
-}
-
-export function isSessionRegistration(value: unknown): value is SessionRegistration {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const session = value as Record<string, unknown>;
-  if (
-    typeof session.cwd !== "string"
-    || typeof session.model !== "string"
-    || typeof session.pid !== "number"
-    || typeof session.startedAt !== "number"
-    || typeof session.lastActivity !== "number"
-  ) return false;
-  if (session.name !== undefined && typeof session.name !== "string") return false;
-  if (session.status !== undefined && typeof session.status !== "string") return false;
-  for (const key of ["contextPct", "contextTokens", "contextWindow"] as const) {
-    if (session[key] !== undefined && typeof session[key] !== "number") return false;
-  }
-  return session.extensions === undefined || Array.isArray(session.extensions);
-}
-
-export function isSessionInfo(value: unknown): value is SessionInfo {
-  if (!isSessionRegistration(value)) return false;
-  const session = value as unknown as Record<string, unknown>;
-  if (typeof session.id !== "string") return false;
-  if (session.peerUid !== undefined && typeof session.peerUid !== "number") return false;
-  return session.trustedLocal === undefined || typeof session.trustedLocal === "boolean";
-}
-
 export type ClientMessage =
-  | { type: "register"; session: SessionRegistration; sessionId?: string; stateId?: string }
+  | { type: "register"; session: SessionRegistration; sessionId?: string; stateId?: string; scopeId?: string }
   | { type: "unregister" }
   | { type: "extension_capabilities_update"; extensions: ExtensionCapability[] }
   | { type: "list"; requestId: string }
-  | { type: "send"; to: string; message: Message }
+  | { type: "send"; to: string; message: Message; targetId?: string; targetEpoch?: string }
   | { type: "message_receipt"; receipt: MessageReceipt }
   | { type: "cancel_message"; messageId: string }
   | { type: "cancel_ask"; messageId: string }
-  | { type: "presence"; name?: string; status?: string; model?: string; contextPct?: number | null; contextTokens?: number | null; contextWindow?: number | null }
+  | { type: "presence"; name?: string; runtimeFallbackAlias?: boolean; status?: string; model?: string; contextPct?: number | null; contextTokens?: number | null; contextWindow?: number | null }
   | {
       type: "extension_publish";
       namespace: string;
@@ -178,8 +145,8 @@ export type BrokerMessage =
   | { type: "session_joined"; session: SessionInfo }
   | { type: "session_left"; sessionId: string }
   | { type: "error"; error: string }
-  | { type: "delivered"; messageId: string }
-  | { type: "delivery_failed"; messageId: string; reason: string }
+  | ({ type: "delivered"; messageId: string } & DeliveryDetails)
+  | ({ type: "delivery_failed"; messageId: string; reason: string } & DeliveryDetails)
   | { type: "message_receipt"; from: SessionInfo; receipt: MessageReceipt }
   | { type: "message_control"; from: SessionInfo; control: MessageControl }
   | { type: "extension_owner"; namespace: string; ownerId?: string; ownerEpoch?: string }
