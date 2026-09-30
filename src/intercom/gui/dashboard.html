@@ -3,156 +3,165 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>gang · mission control</title>
+<title>gang mission control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <style>
-  /* Quiet by default. Red is reserved for things that need you; everything else is grey. */
+  /* pi-tooling look: white ink on black, Archivo wide, Plex Mono utility, no accent hue.
+     Anything that needs you is inverted (black on white). Everything else stays ink. */
   :root {
-    --ink:#0b0b0b; --ink-2:#121212; --ink-3:#1a1a1a; --line:#232323;
-    --red:#dd323f; --red-tint:rgba(221,50,63,.08); --paper:#ebebe6;
-    --fg:#e8e6df; --text:#c9c6bd; --muted:#85827a; --muted-2:#57554e;
-    --amber:#e8a33a;
-    --ui:-apple-system,BlinkMacSystemFont,"Inter","Helvetica Neue",Arial,sans-serif;
-    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ink:#000; --paper:#f7f7f2; --graphite:#b4b4ae; --dim:#8c8c87; --rule:#2e2e2e; --panel:#121212;
+    --red:#ff4d57; --amber:#ffb224;
+    --sans:"Archivo",-apple-system,"Segoe UI",sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,monospace;
   }
-  * { box-sizing:border-box; }
+  * { margin:0; padding:0; box-sizing:border-box; }
   [hidden] { display:none !important; }
   html { background:var(--ink); }
-  ::selection { background:var(--red); color:#fff; }
   body {
-    margin:0; height:100vh; overflow:hidden; display:grid; grid-template-rows:auto 1fr; grid-template-columns:minmax(0,1fr);
-    font:14px/1.55 var(--ui); background:var(--ink); color:var(--fg); -webkit-font-smoothing:antialiased;
+    height:100vh; overflow:hidden; display:flex; flex-direction:column;
+    background:var(--ink); color:var(--paper); font:15px/1.55 var(--sans); -webkit-font-smoothing:antialiased;
   }
-  button { font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; text-align:left; }
+  ::selection { background:var(--paper); color:var(--ink); }
+  button { font:inherit; color:inherit; background:none; border:0; cursor:pointer; text-align:left; }
+  :focus-visible { outline:2px solid var(--paper); outline-offset:2px; }
   .num { font-variant-numeric:tabular-nums; }
-  .cap { font:600 12px/1 var(--ui); color:var(--muted-2); }
+  .label { font:500 11.5px/1 var(--mono); letter-spacing:.06em; color:var(--graphite); }
+  .inv { background:var(--paper); color:var(--ink); }
+  /* member identity: solid colour tag, black text */
+  .tag { display:inline-block; padding:1px 7px 2px; background:var(--c); color:#000; font-weight:750; font-stretch:110%; line-height:1.35; overflow-wrap:anywhere; }
+  .c { color:var(--c); font-weight:600; }
 
   /* ── top bar ─────────────────────────────────────────────────── */
-  .topbar { display:flex; align-items:center; gap:14px; height:48px; padding:0 20px; border-bottom:1px solid var(--line); }
-  .logo { font:700 15px/1 var(--ui); letter-spacing:-.01em; color:var(--paper); background:var(--red); padding:4px 8px; border-radius:4px; }
-  .summary { color:var(--muted); font-size:13px; }
+  .top { flex:none; display:flex; align-items:center; gap:24px; padding:12px 20px; border-bottom:1px solid var(--rule); }
+  .logo { font-weight:850; font-stretch:125%; font-size:20px; letter-spacing:-.03em; line-height:1; }
+  #status { font-size:15px; color:var(--graphite); }
+  #status b { color:var(--paper); font-weight:700; }
   .spacer { flex:1; }
-  .conn { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--muted-2); }
-  .conn i { width:6px; height:6px; border-radius:50%; background:var(--muted-2); }
-  .conn.live { color:var(--muted); } .conn.live i { background:#3fb96a; }
-  .conn.down { color:var(--red); } .conn.down i { background:var(--red); }
+  .stat { font:12.5px/1 var(--mono); color:var(--graphite); }
+  .stat b { color:var(--paper); font-weight:600; }
+  #conn.down { padding:4px 7px; margin:-4px 0; background:var(--paper); color:var(--ink); }
 
-  .main { display:grid; grid-template-columns:260px minmax(0,1fr); overflow:hidden; }
+  /* ── needs you: inverted band, only when something is wrong ──── */
+  #attn { flex:none; max-height:30vh; overflow-y:auto; }
+  .alert { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:20px; align-items:center; width:100%; padding:9px 20px; font-size:15px; background:var(--red); color:#fff; border-bottom:1px solid rgba(0,0,0,.25); }
+  .alert.amber { background:var(--amber); color:#000; }
+  .alert:last-child { border-bottom:0; }
+  .alert b { font-weight:750; font-stretch:110%; }
+  .alert .age { font:500 12.5px/1 var(--mono); }
+  @media (hover:hover) and (pointer:fine) { .alert:hover { filter:brightness(1.08); } }
+  .alert .tag { box-shadow:0 0 0 1px rgba(0,0,0,.35); }
 
-  /* ── squad: one line per member ──────────────────────────────── */
-  aside { border-right:1px solid var(--line); overflow-y:auto; padding:14px 10px; }
-  aside .cap { padding:0 10px 8px; display:block; }
-  .member { display:flex; align-items:center; gap:10px; width:100%; padding:8px 10px; border-radius:6px; }
-  @media (hover:hover) and (pointer:fine) { .member:hover { background:var(--ink-2); } }
-  .member.sel { background:var(--ink-3); }
-  .dot { flex:none; width:8px; height:8px; border-radius:50%; background:var(--c); }
-  .m-body { min-width:0; flex:1; }
-  .m-name { font-weight:600; font-size:14px; color:var(--fg); }
-  .m-sub { font-size:12px; color:var(--muted-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .m-state { flex:none; font-size:12px; color:var(--muted); }
-  .m-state.busy { color:var(--fg); }
-  .m-state.warn { color:var(--amber); }
-  .m-state.hot { color:var(--red); }
-  .m-detail { margin:2px 10px 8px 28px; font:12px/1.6 var(--mono); color:var(--muted-2); }
-  .m-detail div { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* ── squad: tmux-style pane grid across the full width ───────── */
+  #squad { flex:none; display:grid; grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); max-height:42vh; overflow-y:auto; border-bottom:3px solid var(--paper); }
+  .pane { position:relative; display:flex; flex-direction:column; gap:8px; padding:14px 20px 14px; border-right:1px solid var(--rule); border-bottom:1px solid var(--rule); cursor:pointer; min-width:0; }
+  @media (hover:hover) and (pointer:fine) { .pane:hover { background:var(--panel); } }
+  .pane.sel { background:var(--panel); box-shadow:inset 0 0 0 1px var(--graphite); }
+  .p-top { display:flex; align-items:baseline; gap:12px; }
+  .p-name { font-size:16px; letter-spacing:-.01em; }
+  .p-state { margin-left:auto; flex:none; font:500 12.5px/1 var(--mono); color:var(--graphite); white-space:nowrap; }
+  .p-state.busy { color:var(--paper); }
+  .p-state.flag { background:var(--red); color:#fff; padding:4px 6px; margin-top:-4px; }
+  .p-state.warn { background:var(--amber); color:#000; padding:4px 6px; margin-top:-4px; }
+  .p-said { font-size:14px; line-height:1.5; color:var(--graphite); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .p-said.none { color:var(--dim); }
+  .p-when { font:12px/1 var(--mono); color:var(--graphite); }
+  .p-foot { margin-top:auto; display:flex; align-items:center; gap:14px; font:12px/1 var(--mono); color:var(--graphite); }
+  .meter { display:inline-flex; align-items:center; gap:7px; }
+  .meter i { position:relative; display:block; width:64px; height:4px; background:var(--rule); }
+  .meter i::after { content:""; position:absolute; inset:0 auto 0 0; width:var(--p); background:var(--graphite); }
+  .meter.hot { color:var(--amber); } .meter.hot i::after { background:var(--amber); }
+  .copy { margin-left:auto; padding:4px 7px; border:1px solid var(--rule); font:12px/1 var(--mono); color:var(--graphite); }
+  @media (hover:hover) and (pointer:fine) { .copy:hover { background:var(--paper); color:var(--ink); border-color:var(--paper); } }
+  .copy:active { transform:scale(.97); }
+  .squad-empty { padding:20px; color:var(--graphite); }
 
-  /* ── right column ────────────────────────────────────────────── */
-  main { display:flex; flex-direction:column; overflow:hidden; min-width:0; position:relative; }
+  /* ── conversation ────────────────────────────────────────────── */
+  .convo { flex:1; min-height:0; display:flex; flex-direction:column; }
+  .c-head { flex:none; display:flex; align-items:center; gap:14px; padding:10px 20px; border-bottom:1px solid var(--rule); }
+  .chip { display:inline-flex; align-items:center; gap:8px; font:12.5px/1 var(--mono); padding:5px 4px 5px 9px; }
+  .chip button { padding:0 5px; font-size:15px; line-height:1; }
+  #q { margin-left:auto; width:260px; padding:8px 11px; background:var(--panel); border:1px solid var(--rule); color:var(--paper); font:13px/1 var(--mono); outline:none; }
+  #q:focus { border-color:var(--graphite); }
+  #q::placeholder { color:var(--dim); }
 
-  /* attention: only rendered when something needs you */
-  #attn { flex:none; border-bottom:1px solid var(--line); padding:14px 20px; display:flex; flex-direction:column; gap:6px; }
-  #attn.clear { display:none; }
-  .alert { display:flex; align-items:baseline; gap:10px; width:100%; max-width:760px; padding:8px 12px; border-radius:6px; background:var(--red-tint); border:1px solid rgba(221,50,63,.25); color:var(--fg); }
-  .alert.amber { background:rgba(232,163,58,.07); border-color:rgba(232,163,58,.25); }
-  .alert .k { flex:none; width:7px; height:7px; border-radius:50%; background:var(--red); transform:translateY(-1px); }
-  .alert.amber .k { background:var(--amber); }
-  .alert .age { margin-left:auto; flex:none; font-size:12px; color:var(--muted); }
-  @media (hover:hover) and (pointer:fine) { .alert:hover { border-color:rgba(221,50,63,.5); } .alert.amber:hover { border-color:rgba(232,163,58,.5); } }
-  .alert:active { transform:scale(.99); }
+  #scroller { flex:1; overflow-y:auto; position:relative; }
+  .msg { display:grid; grid-template-columns:260px minmax(0,1fr) 64px; gap:20px; padding:14px 20px; border-bottom:1px solid var(--rule); scroll-margin:40px; }
+  .msg.stale { opacity:.45; }
+  .msg.flash { background:var(--panel); }
+  .who { font-size:14.5px; }
+  .to { margin-top:5px; font:12px/1.4 var(--mono); color:var(--graphite); overflow-wrap:anywhere; }
+  .waiting { display:inline-block; margin-top:7px; font:500 11.5px/1 var(--mono); padding:4px 6px; background:var(--red); color:#fff; }
+  .text { color:var(--paper); white-space:pre-wrap; word-break:break-word; max-width:110ch; }
+  .text.clamp { max-height:3.1em; white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; cursor:pointer; }
+  .msg.open { background:rgba(255,77,87,.07); }
+  .time { text-align:right; font:12.5px/1.6 var(--mono); color:var(--graphite); }
+  .divider { padding:7px 20px; font:500 11.5px/1 var(--mono); letter-spacing:.06em; border-bottom:1px solid var(--rule); color:var(--graphite); }
+  .divider.new { background:var(--paper); color:var(--ink); border-color:var(--paper); }
 
-  .convo-head { flex:none; display:flex; align-items:center; gap:10px; padding:10px 20px; border-bottom:1px solid var(--line); min-height:44px; }
-  .chip { display:inline-flex; align-items:center; gap:6px; padding:3px 4px 3px 9px; border-radius:99px; background:var(--ink-3); font-size:12px; color:var(--fg); }
-  .chip button { width:18px; height:18px; border-radius:50%; text-align:center; color:var(--muted); line-height:18px; }
-  @media (hover:hover) and (pointer:fine) { .chip button:hover { background:var(--line); color:var(--fg); } }
-  #q { margin-left:auto; width:200px; padding:6px 10px; border-radius:6px; border:1px solid transparent; background:var(--ink-2); color:var(--fg); font:13px/1 var(--ui); outline:none; }
-  #q:focus { border-color:var(--line); }
-  #q::placeholder { color:var(--muted-2); }
-
-  /* conversation: chronological, reads top to bottom */
-  #feed { flex:1; overflow-y:auto; padding:8px 0 24px; }
-  .msg { max-width:760px; padding:10px 20px; scroll-margin:40px; }
-  .msg.open { box-shadow:inset 2px 0 0 var(--red); }
-  .msg.stale { opacity:.4; }
-  .msg.flash { background:var(--ink-2); }
-  .head { display:flex; align-items:baseline; gap:6px; font-size:13px; }
-  .who { font-weight:600; color:var(--c); }
-  .to { color:var(--muted-2); }
-  .to .who { font-weight:500; }
-  .time { margin-left:auto; padding-left:12px; font-size:12px; color:var(--muted-2); font-variant-numeric:tabular-nums; }
-  .await { font-size:12px; color:var(--red); }
-  .text { margin-top:3px; color:var(--text); white-space:pre-wrap; word-break:break-word; }
-  .text.clamp { cursor:pointer; }
-  .more { margin-top:2px; font-size:12px; color:var(--muted); }
-  @media (hover:hover) and (pointer:fine) { .more:hover { color:var(--fg); } }
-  .sep { max-width:760px; margin:14px 20px 6px; font-size:12px; color:var(--muted-2); }
-
-  .jump { position:absolute; left:50%; bottom:16px; transform:translateX(-50%); padding:6px 12px; border-radius:99px; background:var(--fg); color:var(--ink); font-size:12px; font-weight:600; display:none; box-shadow:0 4px 16px rgba(0,0,0,.5); }
+  .jump { position:sticky; bottom:14px; display:none; margin:10px auto 0; width:max-content; padding:8px 12px; font:500 12.5px/1 var(--mono); box-shadow:0 0 0 4px var(--ink); }
   .jump.on { display:block; }
+  .jump:active { transform:scale(.97); }
+  .empty { padding:24px 20px; color:var(--graphite); }
+  .empty b { color:var(--paper); font-weight:700; }
 
-  .empty { padding:48px 20px; color:var(--muted-2); font-size:13px; }
-
-  ::-webkit-scrollbar { width:8px; }
-  ::-webkit-scrollbar-thumb { background:var(--line); border-radius:4px; }
+  ::-webkit-scrollbar { width:9px; }
+  ::-webkit-scrollbar-thumb { background:var(--rule); }
 
   @media (max-width:760px) {
-    .summary { display:none; }
-    .main { grid-template-columns:minmax(0,1fr); grid-template-rows:auto 1fr; }
-    aside { border-right:0; border-bottom:1px solid var(--line); max-height:32vh; padding:10px 6px; }
-    .topbar, .convo-head, #attn, .msg { padding-left:16px; padding-right:16px; }
-    #q { width:140px; }
+    .top { gap:14px; padding:12px 16px; } #status { display:none; }
+    #squad { grid-template-columns:minmax(0,1fr); max-height:38vh; }
+    .pane, .alert, .c-head, .msg, .divider { padding-left:16px; padding-right:16px; }
+    .msg { grid-template-columns:minmax(0,1fr) auto; gap:4px 12px; }
+    .msg .text { grid-column:1 / -1; }
+    #q { width:auto; flex:1; }
   }
 </style>
 </head>
 <body>
-  <div class="topbar">
+  <div class="top">
     <span class="logo">gang</span>
-    <span class="summary" id="summary"></span>
+    <span id="status"></span>
     <span class="spacer"></span>
-    <span class="conn" id="conn"><i></i><span id="conn-label">connecting</span></span>
+    <span class="stat" id="summary"></span>
+    <span class="stat" id="conn">connecting</span>
   </div>
 
-  <div class="main">
-    <aside><span class="cap">Squad</span><div id="members"></div></aside>
-    <main>
-      <div id="attn" class="clear"></div>
-      <div class="convo-head">
-        <span class="cap" id="convo-title">Conversation</span>
-        <span class="chip" id="who-chip" hidden><span class="dot" id="who-dot"></span><span id="who-name"></span><button id="who-clear" aria-label="Show everyone">×</button></span>
-        <input id="q" type="search" placeholder="Search  /" autocomplete="off" spellcheck="false" />
-      </div>
-      <div id="feed"></div>
-      <button class="jump" id="jump">↓ New messages</button>
-    </main>
-  </div>
+  <div id="attn" hidden></div>
+  <div id="squad"></div>
+
+  <section class="convo">
+    <div class="c-head">
+      <span class="label" id="c-title">conversation</span>
+      <span class="chip inv" id="who-chip" hidden><span id="who-name"></span><button id="who-clear" aria-label="Show everyone">×</button></span>
+      <input id="q" type="search" placeholder="search messages  /" autocomplete="off" spellcheck="false" />
+    </div>
+    <div id="scroller"><div id="feed"></div><button class="jump inv" id="jump">↓ new messages</button></div>
+  </section>
 
 <script>
-// ponytail: client-only view model; the broker already sends ids, replyTo, supersedes and context usage.
+// ponytail: client-only view model; the broker already sends ids, replyTo, supersedes, context usage and tmux pane.
 const QUIET_MS = 5 * 60_000;     // busy with no status change this long → surface it
 const CTX_WARN = 80;             // context % worth interrupting for
 const MAX_FEED = 500;
-const PALETTE = ["#7cc4f5", "#b79cf2", "#5fd4c0", "#e6c36a", "#f28bb8", "#a8d672", "#f5a97c", "#9fb4ff"];
+const SEEN_KEY = "gang:lastSeen";
+// Identity colours: bright on black, none of them red or amber (those mean "needs you" / "stuck").
+const PALETTE = ["#4cc9f0", "#b388ff", "#7bed9f", "#ff8fcf", "#74a8ff", "#c0eb75", "#f9f871", "#63e6be"];
+const colors = new Map();
 
 const members = new Map();       // sessionId -> SessionInfo
 let feed = [];                   // oldest → newest
 const expanded = new Set();
-const colors = new Map();        // member key -> colour, assigned in order of appearance
+const cwds = new Map();          // member key -> last known cwd (survives the member leaving)
 let who = null, query = "", online = null;
+let lastSeen = 0; try { lastSeen = Number(localStorage.getItem(SEEN_KEY)) || 0; } catch {}
 
 const $ = (id) => document.getElementById(id);
-const membersEl = $("members"), feedEl = $("feed"), attnEl = $("attn"), q = $("q"), jumpBtn = $("jump");
+const squadEl = $("squad"), feedEl = $("feed"), scroller = $("scroller"), attnEl = $("attn"), q = $("q"), jumpBtn = $("jump");
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 const keyOf = (s) => s.name || s.id;                    // what the broker puts in from/to
-const memberByKey = (k) => [...members.values()].find((s) => keyOf(s) === k);
 const project = (cwd) => (cwd || "").replace(/\/+$/, "").split("/").pop();
 function kind(st){ st = st || ""; return st.startsWith("tool:") ? "tool" : st.startsWith("thinking") ? "thinking" : st.startsWith("idle") ? "idle" : ""; }
 function dur(ms){
@@ -162,14 +171,23 @@ function dur(ms){
 }
 const tok = (n) => n >= 1000 ? Math.round(n/1000)+"k" : String(n);
 const clock = (ts) => new Date(ts).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit", hour12:false });
+const nearBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;
 
-/* Generated names like "subagent-chat-01a0ef29-d44c-769a" → "769a". Human names stay as-is. */
+/* Readable names. Generated ids ("subagent-chat-…-769a") become the project they work in;
+   a short id suffix is added only when two members share a project. */
+function idTail(k){ const m = /-([0-9a-f]{4,})-([0-9a-f]{4,})$/i.exec(k || ""); return m ? m[2].slice(-4).toLowerCase() : null; }
 function label(k){
-  const m = /^(.*?)[-_]?((?:[0-9a-f]{4,}-)+([0-9a-f]{4,}))$/i.exec(k || "");
-  return m ? m[3].slice(-4).toLowerCase() : (k || "?");
+  const tail = idTail(k);
+  if (!tail) return k || "?";                           // a real, human-chosen name
+  const proj = project(cwds.get(k));
+  if (!proj) return tail;
+  const clash = [...cwds].some(([o, c]) => o !== k && project(c) === proj);
+  return clash ? `${proj} ${tail}` : proj;
 }
+
 function color(k){ if (!colors.has(k)) colors.set(k, PALETTE[colors.size % PALETTE.length]); return colors.get(k); }
-const whoHtml = (k) => `<span class="who" style="--c:${color(k)}" title="${esc(k)}">${esc(label(k))}</span>`;
+const tag = (k, cls = "") => `<span class="tag ${cls}" style="--c:${color(k)}" title="${esc(k)}">${esc(label(k))}</span>`;
+const ctext = (k) => `<span class="c" style="--c:${color(k)}" title="${esc(k)}">${esc(label(k))}</span>`;
 
 /* Open asks = expectsReply with no reply, not superseded by a retry/edit. */
 function index(){
@@ -193,54 +211,61 @@ function stateOf(s, now){
 function attention(ix, now){
   const out = [];
   for (const m of feed) if (ix.isOpen(m)) out.push({
-    level:"red", ts:m.ts, id:m.id, focus:m.to,
-    html:`${whoHtml(m.to)} hasn't replied to ${whoHtml(m.from)}`, age: dur(now - m.ts),
+    id:m.id, age:dur(now - m.ts) + " waiting",
+    level:"red", html:`${tag(m.to)} hasn't answered ${tag(m.from)}`,
   });
-  for (const s of members.values()){                     // one line per member, reasons joined
+  for (const s of members.values()){                     // one row per member, reasons joined
     const st = stateOf(s, now), k = keyOf(s), why = [];
-    if (st.stuck) why.push(`on <b>${esc(st.text)}</b> with no update for ${dur(st.since)}`);
-    if ((s.contextPct ?? 0) >= CTX_WARN) why.push(`context ${s.contextPct}% full`);
-    if (why.length) out.push({ level:"amber", focus:k, html:`${whoHtml(k)} ${why.join(" · ")}`, age:"" });
+    if (st.stuck) why.push(`has been running ${esc(st.text)} for ${dur(st.since)} with no update`);
+    if ((s.contextPct ?? 0) >= CTX_WARN) why.push(`is at ${s.contextPct}% context`);
+    if (why.length) out.push({ level:"amber", focus:k, age:"", html:`${tag(k)} ${why.join(" and ")}` });
   }
   return out;
 }
 
 function render(){
   const now = Date.now(), ix = index();
+  const sorted = [...members.values()].sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
+  for (const s of sorted){ cwds.set(keyOf(s), s.cwd); color(keyOf(s)); }   // colours follow join order, so they stay put
 
-  // top summary: one sentence
   const busy = [...members.values()].filter((s) => stateOf(s, now).busy).length;
-  $("summary").textContent = members.size ? `${members.size} member${members.size > 1 ? "s" : ""} · ${busy} working` : "";
+  $("summary").innerHTML = members.size ? `<b class="num">${busy}</b>/<b class="num">${members.size}</b> working` : "";
 
-  // attention
   const items = attention(ix, now);
-  attnEl.classList.toggle("clear", items.length === 0);
-  attnEl.innerHTML = items.map((a, i) =>
-    `<button class="alert ${a.level === "amber" ? "amber" : ""}" data-i="${i}"><span class="k"></span><span>${a.html}</span><span class="age num">${a.age}</span></button>`).join("");
+  attnEl.hidden = items.length === 0;
+  attnEl.innerHTML = items.map((a, i) => `<button class="alert ${a.level === "amber" ? "amber" : ""}" data-i="${i}"><span>${a.html}</span><span class="age num">${a.age}</span></button>`).join("");
   attnEl._items = items;
+  $("status").innerHTML = !members.size ? "No one is running."
+    : items.length ? `<b>${items.length} ${items.length > 1 ? "things need" : "thing needs"} you</b>`
+    : "All clear, nobody is waiting on anyone";
+  document.title = items.length ? `(${items.length}) gang` : "gang mission control";
 
-  // squad
+  // last thing each member said
+  const lastSaid = new Map();
+  for (const m of feed) lastSaid.set(m.from, m);
   const owes = new Set(feed.filter(ix.isOpen).map((m) => m.to));
-  const list = [...members.values()].sort((a, b) => keyOf(a).localeCompare(keyOf(b)));
-  list.forEach((s) => color(keyOf(s)));
-  membersEl.innerHTML = list.length ? list.map((s) => {
-    const k = keyOf(s), st = stateOf(s, now), sel = who === k;
-    const hot = owes.has(k), warn = st.stuck || (s.contextPct ?? 0) >= CTX_WARN;
-    const state = hot ? "owes reply" : st.stuck ? `stuck ${dur(st.since)}` : st.text;
-    const pct = typeof s.contextPct === "number" ? `${s.contextPct}% context${s.contextWindow ? ` (${tok(s.contextTokens || 0)}/${tok(s.contextWindow)})` : ""}` : "";
-    return `<button class="member${sel ? " sel" : ""}" data-who="${esc(k)}" title="${esc(k)}">
-        <span class="dot" style="--c:${color(k)}"></span>
-        <span class="m-body"><div class="m-name">${esc(label(k))}</div><div class="m-sub">${esc(project(s.cwd))}</div></span>
-        <span class="m-state ${hot ? "hot" : warn ? "warn" : st.busy ? "busy" : ""}">${esc(state)}</span>
-      </button>` + (sel ? `<div class="m-detail">
-        <div>${esc(s.model || "")}</div><div title="${esc(s.cwd)}">${esc(s.cwd || "")}</div>
-        <div>${[pct, s.startedAt ? "up " + dur(now - s.startedAt) : "", s.tmuxPane ? "pane " + s.tmuxPane : ""].filter(Boolean).map(esc).join(" · ")}</div>
-      </div>` : "");
-  }).join("") : `<div class="empty">No one yet.<br>gang spawn &lt;role&gt; &lt;task&gt;</div>`;
 
-  // filter chip
+  const list = [...members.values()].sort((a, b) => label(keyOf(a)).localeCompare(label(keyOf(b))));
+  squadEl.innerHTML = list.length ? list.map((s) => {
+    const k = keyOf(s), st = stateOf(s, now), pct = s.contextPct;
+    const flag = owes.has(k) ? "owes a reply" : st.stuck ? `stuck ${dur(st.since)}` : "", flagCls = owes.has(k) ? "flag" : st.stuck ? "warn" : "";
+    const state = flag || `${st.text} ${dur(st.since)}`;
+    const said = lastSaid.get(k);
+    const hot = (pct ?? 0) >= CTX_WARN;
+    return `<div class="pane${who === k ? " sel" : ""}" data-who="${esc(k)}" title="${esc(k)}&#10;${esc(s.cwd)}">
+      <div class="p-top">${tag(k, "p-name")}<span class="p-state ${flagCls || (st.busy ? "busy" : "")}">${esc(state)}</span></div>
+      ${said ? `<div class="p-when">said ${dur(now - said.ts)} ago to ${ctext(said.to)}</div><div class="p-said">${esc(said.text)}</div>`
+             : `<div class="p-said none">Hasn't said anything yet.</div>`}
+      <div class="p-foot">
+        ${typeof pct === "number" ? `<span class="meter${hot ? " hot" : ""}" title="${s.contextWindow ? `${tok(s.contextTokens || 0)} of ${tok(s.contextWindow)} tokens` : ""}"><i style="--p:${Math.min(100, pct)}%"></i>${pct}%</span>` : ""}
+        <span>${esc(s.model || "")}</span>
+        ${s.tmuxPane ? `<button class="copy" data-copy="tmux switch-client -t '${esc(s.tmuxPane)}'" title="Copy the tmux command that jumps to this pane">tmux ${esc(s.tmuxPane)}</button>` : ""}
+      </div>
+    </div>`;
+  }).join("") : `<div class="squad-empty">No members yet. Spawn one with gang spawn.</div>`;
+
   $("who-chip").hidden = !who;
-  if (who){ $("who-dot").style.setProperty("--c", color(who)); $("who-name").textContent = label(who); }
+  if (who) $("who-name").textContent = label(who);
 }
 
 function renderFeed(stick){
@@ -248,45 +273,53 @@ function renderFeed(stick){
   const shown = feed.filter((m) =>
     (!who || m.from === who || m.to === who) &&
     (!ql || `${m.from} ${m.to} ${label(m.from)} ${label(m.to)} ${m.text}`.toLowerCase().includes(ql)));
+  $("c-title").textContent = `conversation, ${shown.length} message${shown.length === 1 ? "" : "s"}`;
 
-  const atBottom = feedEl.scrollHeight - feedEl.scrollTop - feedEl.clientHeight < 60;
-  const top = feedEl.scrollTop;
-
+  const atBottom = nearBottom(), top = scroller.scrollTop;
   if (!shown.length){
-    feedEl.innerHTML = `<div class="empty">${feed.length ? "Nothing matches." : online === false ? "Can't reach the broker." : "No messages yet."}</div>`;
+    feedEl.innerHTML = feed.length ? `<div class="empty"><b>No matches.</b> Press Esc to clear the filters.</div>`
+      : online === false ? `<div class="empty"><b>Can't reach the broker.</b> Start a Pi session with gang loaded.</div>`
+      : `<div class="empty"><b>Quiet so far.</b> Messages between members show up here.</div>`;
   } else {
-    let lastDay = "";
+    let lastDay = new Date().toDateString(), markedNew = false;
     feedEl.innerHTML = shown.map((m) => {
-      const day = new Date(m.ts).toDateString();
-      const sep = day !== lastDay && lastDay ? `<div class="sep">${esc(new Date(m.ts).toLocaleDateString([], { weekday:"long", month:"short", day:"numeric" }))}</div>` : "";
+      const d = new Date(m.ts), day = d.toDateString();
+      let sep = "";
+      if (day !== lastDay) sep += `<div class="divider">${esc(d.toLocaleDateString([], { weekday:"long", month:"short", day:"numeric" }).toLowerCase())}</div>`;
+      if (!markedNew && lastSeen && m.ts > lastSeen && m !== shown[0]){ sep += `<div class="divider new">new since you last looked</div>`; markedNew = true; }
+      if (lastSeen && m.ts > lastSeen) markedNew = true;
       lastDay = day;
-      const open = ix.isOpen(m), ex = expanded.has(m.id), prev = preview(m.text), long = prev !== (m.text || "");
+      const open = ix.isOpen(m), ex = expanded.has(m.id);
+      const long = (m.text || "").length > 240 || (m.text || "").split("\n").length > 2;
       return sep + `<div class="msg${open ? " open" : ""}${ix.superseded.has(m.id) ? " stale" : ""}" id="m-${esc(m.id)}">
-        <div class="head">${whoHtml(m.from)}<span class="to">to ${whoHtml(m.to)}</span>${open ? `<span class="await">· waiting for reply</span>` : ""}
-          <span class="time" title="${esc(new Date(m.ts).toLocaleString())}">${clock(m.ts)}</span></div>
-        <div class="text${long && !ex ? " clamp" : ""}" data-more="${long ? esc(m.id) : ""}">${esc(ex ? m.text : prev)}</div>
-        ${long ? `<button class="more" data-more="${esc(m.id)}">${ex ? "Less" : "More"}</button>` : ""}
+        <div>
+          <div>${tag(m.from, "who")}</div>
+          <div class="to">to ${ctext(m.to)}</div>
+          ${open ? `<span class="waiting">waiting for reply</span>` : ""}
+        </div>
+        <div class="text${long && !ex ? " clamp" : ""}" ${long ? `data-more="${esc(m.id)}" title="${ex ? "click to collapse" : "click to read all"}"` : ""}>${esc(long && !ex ? m.text.replace(/\s+/g, " ") : m.text)}</div>
+        <div class="time num" title="${esc(d.toLocaleString())}">${clock(m.ts)}</div>
       </div>`;
     }).join("");
   }
-  if (stick || atBottom){ feedEl.scrollTop = feedEl.scrollHeight; jumpBtn.classList.remove("on"); }
-  else feedEl.scrollTop = top;
-}
-
-/* First ~4 lines / 320 chars, cut at a word boundary. */
-function preview(t){
-  t = t || "";
-  let cut = t.split("\n").slice(0, 4).join("\n");
-  if (cut.length > 320) cut = cut.slice(0, 320).replace(/\s+\S*$/, "");
-  cut = cut.trimEnd();
-  return cut.length < t.trimEnd().length ? cut + " …" : t;
+  if (stick || atBottom){ scroller.scrollTop = scroller.scrollHeight; jumpBtn.classList.remove("on"); }
+  else scroller.scrollTop = top;
 }
 
 function norm(m){ return { ...m, ts: typeof m.ts === "number" ? m.ts : Date.now() }; }
 
 /* ── interactions ─────────────────────────────────────────────── */
 function focusWho(k){ who = k; render(); renderFeed(true); }
-membersEl.onclick = (e) => { const b = e.target.closest("[data-who]"); if (b) focusWho(who === b.dataset.who ? null : b.dataset.who); };
+squadEl.onclick = async (e) => {
+  const c = e.target.closest("[data-copy]");
+  if (c){
+    try { await navigator.clipboard.writeText(c.dataset.copy); c.textContent = "copied"; }
+    catch { c.textContent = "copy failed"; }
+    setTimeout(render, 1200);
+    return;
+  }
+  const p = e.target.closest("[data-who]"); if (p && !getSelection().toString()) focusWho(who === p.dataset.who ? null : p.dataset.who);
+};
 $("who-clear").onclick = () => focusWho(null);
 attnEl.onclick = (e) => {
   const b = e.target.closest("[data-i]"); if (!b) return;
@@ -298,23 +331,23 @@ attnEl.onclick = (e) => {
   el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1200);
 };
 feedEl.onclick = (e) => {
-  const t = e.target.closest("[data-more]"); if (!t || !t.dataset.more || getSelection().toString()) return;
+  const t = e.target.closest("[data-more]"); if (!t || getSelection().toString()) return;
   const id = t.dataset.more; expanded.has(id) ? expanded.delete(id) : expanded.add(id); renderFeed();
 };
-feedEl.onscroll = () => { if (feedEl.scrollHeight - feedEl.scrollTop - feedEl.clientHeight < 60) jumpBtn.classList.remove("on"); };
-jumpBtn.onclick = () => { feedEl.scrollTop = feedEl.scrollHeight; jumpBtn.classList.remove("on"); };
+scroller.onscroll = () => { if (nearBottom()) jumpBtn.classList.remove("on"); };
+jumpBtn.onclick = () => { scroller.scrollTop = scroller.scrollHeight; jumpBtn.classList.remove("on"); };
 q.oninput = () => { query = q.value.trim(); renderFeed(true); };
 document.addEventListener("keydown", (e) => {
   if (e.key === "/" && document.activeElement !== q){ e.preventDefault(); q.focus(); }
   else if (e.key === "Escape"){ q.value = ""; query = ""; q.blur(); focusWho(null); }
 });
+// Remember when you last had the page open, for the "new since you last looked" marker.
+const markSeen = () => { try { localStorage.setItem(SEEN_KEY, String(Date.now())); } catch {} };
+document.addEventListener("visibilitychange", () => { if (document.hidden) markSeen(); });
+addEventListener("pagehide", markSeen);
 
 /* ── live feed ────────────────────────────────────────────────── */
-function setOnline(v){
-  online = v;
-  $("conn").className = "conn " + (v ? "live" : "down");
-  $("conn-label").textContent = v ? "live" : "disconnected";
-}
+function setOnline(v){ online = v; $("conn").textContent = v ? "live" : "disconnected"; $("conn").classList.toggle("down", !v); }
 const es = new EventSource("/events");
 es.onopen = () => setOnline(true);
 es.onerror = () => { setOnline(false); renderFeed(); };
@@ -325,12 +358,12 @@ es.onmessage = (e) => {
       members.clear(); (ev.sessions || []).forEach((s) => members.set(s.id, s));
       feed = (ev.feed || []).map(norm);
       render(); renderFeed(true); return;
-    case "session_joined":
+    case "session_joined":  members.set(ev.session.id, ev.session); render(); renderFeed(); return;   // names may resolve now
     case "presence_update": members.set(ev.session.id, ev.session); render(); return;
     case "session_left":    members.delete(ev.sessionId); render(); return;
     case "message": {
       feed.push(norm(ev)); if (feed.length > MAX_FEED) feed.shift();
-      const atBottom = feedEl.scrollHeight - feedEl.scrollTop - feedEl.clientHeight < 60;
+      const atBottom = nearBottom();
       render(); renderFeed();
       if (!atBottom) jumpBtn.classList.add("on");
       return;
@@ -339,7 +372,7 @@ es.onmessage = (e) => {
 };
 
 render(); renderFeed(true);
-setInterval(render, 5000);   // ages and "stuck" detection; nothing here needs per-second updates
+setInterval(render, 5000);   // durations and "stuck" detection; nothing here needs per-second updates
 </script>
 </body>
 </html>
