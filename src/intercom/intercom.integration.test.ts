@@ -203,7 +203,6 @@ function createExtensionHarness(sessionName: string | (() => string) = "child-wo
   const pi = {
     getSessionName: () => typeof sessionName === "function" ? sessionName() : currentSessionName,
     setSessionName: (name: string) => { currentSessionName = name; },
-    shutdown: () => { shutdownCalls.push(1); },
     events: {
       on: (channel: string, handler: (payload: unknown) => void) => {
         events.on(channel, handler);
@@ -240,6 +239,7 @@ function createExtensionHarness(sessionName: string | (() => string) = "child-wo
     isIdle: options.isIdle ?? (() => true),
     hasUI: options.hasUI ?? false,
     abort: options.abort ?? (() => undefined),
+    shutdown: () => { shutdownCalls.push(1); },
     ui: options.ui,
   };
   return {

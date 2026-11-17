@@ -589,11 +589,9 @@ function firstTextContent(result: { content?: Array<{ type: string; text?: strin
   return result.content?.find((item) => item.type === "text" && typeof item.text === "string")?.text?.replace(/\*\*/g, "") ?? "";
 }
 
-function scheduleShutdownIfAvailable(pi: ExtensionAPI): void {
-  if ("shutdown" in pi && typeof pi.shutdown === "function") {
-    const shutdown = pi.shutdown;
-    setTimeout(() => shutdown(), 0);
-  }
+function scheduleShutdown(ctx: ExtensionContext): void {
+  // Deferred so the current tool result flushes before pi tears the session down.
+  setTimeout(() => ctx.shutdown(), 0);
 }
 
 function formatMessageTimestamp(timestamp: number | undefined): string | undefined {
@@ -2470,7 +2468,7 @@ Usage:
               // reapable (`/gang clean`). Gated on childOrchestratorMetadata so only spawned members
               // self-exit; a top-level session that passes `done` never kills itself. Deferred so this
               // tool result flushes before pi tears down.
-              scheduleShutdownIfAvailable(pi);
+              scheduleShutdown(ctx);
               return {
                 content: [{ type: "text", text: `Message sent to ${to}; reported done, ending session.` }],
                 details: { messageId: result.id, delivered: true, done: true },
@@ -2773,10 +2771,8 @@ Usage:
 
   function insertIntoEditor(ctx: ExtensionContext, text: string): boolean {
     if (!ctx.hasUI) return false;
-    const ui = ctx.ui as { getEditorText?: () => string; setEditorText?: (text: string) => void };
-    if (typeof ui.setEditorText !== "function") return false;
-    const existing = typeof ui.getEditorText === "function" ? ui.getEditorText() : "";
-    ui.setEditorText(existing.trim() ? `${existing.trimEnd()}\n\n${text}` : text);
+    const existing = ctx.ui.getEditorText();
+    ctx.ui.setEditorText(existing.trim() ? `${existing.trimEnd()}\n\n${text}` : text);
     return true;
   }
 
