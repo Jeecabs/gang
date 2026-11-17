@@ -1,5 +1,4 @@
 import { defineTool, keyHint, type AgentToolResult, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { StringEnum } from "@earendil-works/pi-ai";
 import { randomUUID } from "crypto";
 import { Type } from "typebox";
 import { Text } from "@earendil-works/pi-tui";
@@ -33,6 +32,11 @@ import { formatContextUsage } from "./format-context.ts";
 import { SUPERINTENDENT_NAMED_EVENT, GANG_MEMBER_REPORT_EVENT, INTERCOM_SESSION_ID_REQUEST_EVENT, type IntercomSessionIdRequest } from "../gang/events.ts";
 import { summarizeResultText } from "../compact-result.ts";
 import { openProjectPane, resolveTargetInCwd, waitForProjectSession, type ProjectPaneLaunch } from "./project-agent.ts";
+
+
+// pi-ai 1.x StringEnum returns a pi-schema type that TypeBox's Static can't infer; keep TypeBox typing with the same {type:"string", enum} shape.
+const StringEnum = <T extends readonly string[]>(values: T, options?: { description?: string; default?: T[number] }) =>
+  Type.Unsafe<T[number]>({ type: "string", enum: [...values], ...options });
 
 const INTERCOM_TOOL_NAME = "intercom";
 const SUBAGENT_CONTROL_INTERCOM_EVENT = "subagent:control-intercom";
